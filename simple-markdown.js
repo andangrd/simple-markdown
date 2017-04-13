@@ -52,7 +52,7 @@ var FORMFEED_R = /\f/g
 var preprocess = function(source) {
     return source.replace(CR_NEWLINE_R, '\n')
             .replace(FORMFEED_R, '')
-            .replace(TAB_R, '    ');
+            .replace(TAB_R, '\t');
 };
 
 /**
@@ -123,6 +123,7 @@ var parserFor = function(rules) {
             while (i < ruleList.length) {
                 var ruleType = ruleList[i];
                 var rule = rules[ruleType];
+                
                 var capture;
                 if (rule.match) {
                     capture = rule.match(source, state, prevCapture);
@@ -137,19 +138,14 @@ var parserFor = function(rules) {
                     // store references to the objects they return and
                     // modify them later. (oops sorry! but this adds a lot
                     // of power--see reflinks.)
-                    if (Array.isArray(parsed)) {
-                      Array.prototype.push.apply(result, parsed);
-                    }
-                    else {
-                      // We also let rules override the default type of
-                      // their parsed node if they would like to, so that
-                      // there can be a single output function for all links,
-                      // even if there are several rules to parse them.
-                      if (parsed.type == null) {
+                    // We also let rules override the default type of
+                    // their parsed node if they would like to, so that
+                    // there can be a single output function for all links,
+                    // even if there are several rules to parse them.
+                    if (parsed.type == null) {
                         parsed.type = ruleType;
-                      }
-                      result.push(parsed);
                     }
+                    result.push(parsed);
 
                     prevCapture = currCaptureString;
                     break;
@@ -340,12 +336,6 @@ var sanitizeUrl = function(url) {
     return url;
 };
 
-var UNESCAPE_URL_R = /\\([^0-9A-Za-z\s])/g;
-
-var unescapeUrl = function(rawUrlString) {
-    return rawUrlString.replace(UNESCAPE_URL_R, "$1");
-};
-
 // Parse some content with the parser `parse`, with state.inline
 // set to true. Useful for block elements; not generally necessary
 // to be used by inline elements (where state.inline is already true.
@@ -375,8 +365,15 @@ var ignoreCapture = function() { return {}; };
 var LIST_BULLET = "(?:[*+-]|\\d+\\.)";
 // recognize the start of a list item:
 // leading space plus a bullet plus a space (`   * `)
-var LIST_ITEM_PREFIX = "( *)(" + LIST_BULLET + ") +";
+var LIST_ITEM_PREFIX = "( *)((|\\t)"+ LIST_BULLET + ") +";
+var LIST_ITEM_PREFIX_OR_CLAUSE = "( *)((\\t)"+ LIST_BULLET + ") +";
+var LIST_ITEM_PREFIX_LEVEL_1 = "( *)("+ LIST_BULLET +" ) +";
+var SUB_LIST_ITEM_PREFIX = "( *)(\\t" + LIST_BULLET + ") +";
+
+var LIST_ITEM_PREFIX_LEVEL_1_R = new RegExp("^" + LIST_ITEM_PREFIX_LEVEL_1);
 var LIST_ITEM_PREFIX_R = new RegExp("^" + LIST_ITEM_PREFIX);
+var SUB_LIST_ITEM_PREFIX_R = new RegExp("^" + SUB_LIST_ITEM_PREFIX);
+
 // recognize an individual list item:
 //  * hi
 //    this is part of the same item
@@ -384,13 +381,30 @@ var LIST_ITEM_PREFIX_R = new RegExp("^" + LIST_ITEM_PREFIX);
 //    as is this, which is a new paragraph in the same item
 //
 //  * but this is not part of the same item
-var LIST_ITEM_R = new RegExp(
-    LIST_ITEM_PREFIX +
-    "[^\\n]*(?:\\n" +
+
+var LIST_ITEM = "(( *)((\\t)(?:[*+-]|\\d+\\.)) +" + 
+               "[^\\n]*(?:\\n(?!(\\t)\\1(?:[*+-]|\\d+\\.)))*" +
+               "(?:[\\n*a-z\\s\\W]|([*+-]|\\d(?!\\. )))*)*(\\t{2,}\\n)" +
+               "|(( *)((|\\t)(?:[*+-]|\\d+\\.)) +[^\\n]*" +
+               "(?:\\n(?!(\\t)\\1(?:[*+-]|\\d+\\.)))*[\\n]*)";
+
+var LIST_ITEM_R = new RegExp(LIST_ITEM,"gm");
+var SUB_LIST_ITEM_R = new RegExp(
+    SUB_LIST_ITEM_PREFIX +
+    "[^\\n]*(?:\\n\\t" +
     "(?!\\1" + LIST_BULLET + " )[^\\n]*)*(\n|$)",
     "gm"
 );
+
+var IS_SUB_LIST_R = /( *)(\t)((?:[*+-]|\d+\.)) [^\n]*(?:\n(?!(|\t)\1(?:[*+-]|\d+\.))[^\n]*)*(\n|$)/;
+var SUB_LIST_MATCH_CONDITION = /( *)([\s\S]*\n(\t(?:[*+-]|\d+\.))|(\t(?:[*+-]|\d+\.))) [\s\S]+?(?:\t{2,}(?! )(?!\1(?:[*+-]|\d+\.) )*|\s*\n*$)/;
+
+var LIST_ITEM_R_STR = LIST_ITEM_PREFIX +
+    "[^\\n]*(?:\\n\\t" +
+    "(?!\\1" + LIST_BULLET + " )[^\\n]*)*(\n|$)";
+
 var BLOCK_END_R = /\n{2,}$/;
+
 // recognize the end of a paragraph block inside a list item:
 // two or more newlines at end end of the item
 var LIST_BLOCK_END_R = BLOCK_END_R;
@@ -403,8 +417,9 @@ var LIST_R = new RegExp(
     "(?!\\1" + LIST_BULLET + " )\\n*" +
     // the \\s*$ here is so that we can parse the inside of nested
     // lists, where our content might end before we receive two `\n`s
-    "|\\s*\n*$)"
+    "|\\s*\\n*$)"
 );
+
 var LIST_LOOKBEHIND_R = /^$|\n *$/;
 
 var TABLES = (function() {
@@ -519,7 +534,7 @@ var TABLES = (function() {
 
 var LINK_INSIDE = "(?:\\[[^\\]]*\\]|[^\\]]|\\](?=[^\\[]*\\]))*";
 var LINK_HREF_AND_TITLE =
-        "\\s*<?((?:[^\\s\\\\]|\\\\.)*?)>?(?:\\s+['\"]([\\s\\S]*?)['\"])?\\s*";
+        "\\s*<?([^\\s]*?)>?(?:\\s+['\"]([\\s\\S]*?)['\"])?\\s*";
 var AUTOLINK_MAILTO_CHECK_R = /mailto:/i;
 
 var parseRef = function(capture, state, refNode) {
@@ -697,9 +712,10 @@ var defaultRules = {
             // lists can be inline, because they might be inside another list,
             // in which case we can parse with inline scope, but need to allow
             // nested lists inside this inline scope.
+            
             var isStartOfLine = LIST_LOOKBEHIND_R.test(prevCapture);
             var isListBlock = state._list || !state.inline;
-
+            
             if (isStartOfLine && isListBlock) {
                 return LIST_R.exec(source);
             } else {
@@ -707,15 +723,19 @@ var defaultRules = {
             }
         },
         parse: function(capture, parse, state) {
-            var bullet = capture[2];
+            
+            var bulletDirty = capture[2];
+            var bullet = bulletDirty.replace("\t", "");
             var ordered = bullet.length > 1;
             var start = ordered ? +bullet : undefined;
+
             var items = capture[0]
                 .replace(LIST_BLOCK_END_R, "\n")
                 .match(LIST_ITEM_R);
-
+            
             var lastItemWasAParagraph = false;
             var itemContent = items.map(function(item, i) {
+
                 // We need to see how far indented this item is:
                 var space = LIST_ITEM_PREFIX_R.exec(item)[0].length;
                 // And then we construct a regex to "unindent" the subsequent
@@ -723,11 +743,16 @@ var defaultRules = {
                 var spaceRegex = new RegExp("^ {1," + space + "}", "gm");
 
                 // Before processing the item, we need a couple things
+                var isSubList = IS_SUB_LIST_R.test(item);
                 var content = item
                          // remove indents on trailing lines:
                         .replace(spaceRegex, '')
                          // remove the bullet:
                         .replace(LIST_ITEM_PREFIX_R, '');
+                 if(isSubList){
+                    content = item;
+                 }
+                
 
                 // Handling "loose" lists, like:
                 //
@@ -768,7 +793,141 @@ var defaultRules = {
                 }
 
                 var result = parse(adjustedContent, state);
+                
+                // Restore our state before returning
+                state.inline = oldStateInline;
+                state._list = oldStateList;
+                return result;
+            });
 
+            return {
+                ordered: ordered,
+                start: start,
+                items: itemContent
+            };
+        },
+        react: function(node, output, state) {
+            var ListWrapper = node.ordered ? "ol" : "ul";
+
+            return reactElement({
+                type: ListWrapper,
+                key: state.key,
+                props: {
+                    start: node.start,
+                    children: node.items.map(function(item, i) {
+                        return reactElement({
+                            type: 'li',
+                            key: i,
+                            props: {
+                                children: output(item, state)
+                            },
+                            $$typeof: TYPE_SYMBOL,
+                            _store: null,
+                        });
+                    })
+                },
+                $$typeof: TYPE_SYMBOL,
+                _store: null,
+            });
+        },
+        html: function(node, output, state) {
+            var listItems = node.items.map(function(item) {
+                return htmlTag("li", output(item, state));
+            }).join("");
+
+            var listTag = node.ordered ? "ol" : "ul";
+            var attributes = {
+                start: node.start
+            };
+            return htmlTag(listTag, listItems, attributes);
+        }
+    },
+    sublist: {
+        match: function(source, state, prevCapture) {
+            // We only want to break into a list if we are at the start of a
+            // line. This is to avoid parsing "hi * there" with "* there"
+            // becoming a part of a list.
+            // You might wonder, "but that's inline, so of course it wouldn't
+            // start a list?". You would be correct! Except that some of our
+            // lists can be inline, because they might be inside another list,
+            // in which case we can parse with inline scope, but need to allow
+            // nested lists inside this inline scope.
+            
+            var isStartOfLine = LIST_LOOKBEHIND_R.test(prevCapture);
+            var isListBlock = state._list || !state.inline;
+            if (isStartOfLine && isListBlock) {
+                return SUB_LIST_MATCH_CONDITION.exec(source);
+            } else {
+                return null;
+            }
+        },
+        parse: function(capture, parse, state) {
+            
+            var bulletDirty = capture[2]; 
+            var bullet = bulletDirty.replace("\t", "");
+            var ordered = bullet.length > 1;
+            var start = ordered ? +bullet : undefined;
+
+            var items = capture[0]
+                .replace(LIST_BLOCK_END_R, "")
+                .match(SUB_LIST_ITEM_R);
+            var lastItemWasAParagraph = false;
+            var itemContent = items.map(function(item, i) {
+                // We need to see how far indented this item is:
+                var space = SUB_LIST_ITEM_PREFIX_R.exec(item)[0].length;
+                // And then we construct a regex to "unindent" the subsequent
+                // lines of the items by that amount:
+                var spaceRegex = new RegExp("^ {1," + space + "}", "gm");
+
+                // Before processing the item, we need a couple things
+                var content = item
+                         // remove indents on trailing lines:
+                        .replace(spaceRegex, '')
+                         // remove the bullet:
+                        .replace(SUB_LIST_ITEM_PREFIX_R, '');
+
+                // Handling "loose" lists, like:
+                //
+                //  * this is wrapped in a paragraph
+                //
+                //  * as is this
+                //
+                //  * as is this
+                var isLastItem = (i === items.length - 1);
+                var containsBlocks = content.indexOf("\n\n") !== -1;
+
+                // Any element in a list is a block if it contains multiple
+                // newlines. The last element in the list can also be a block
+                // if the previous item in the list was a block (this is
+                // because non-last items in the list can end with \n\n, but
+                // the last item can't, so we just "inherit" this property
+                // from our previous element).
+                var thisItemIsAParagraph = containsBlocks ||
+                        (isLastItem && lastItemWasAParagraph);
+                lastItemWasAParagraph = thisItemIsAParagraph;
+
+                // backup our state for restoration afterwards. We're going to
+                // want to set state._list to true, and state.inline depending
+                // on our list's looseness.
+                var oldStateInline = state.inline;
+                var oldStateList = state._list;
+                state._list = true;
+
+                // Parse inline if we're in a tight list, or block if we're in
+                // a loose list.
+                var adjustedContent;
+                if (thisItemIsAParagraph) {
+                    state.inline = false;
+                    adjustedContent = content.replace(LIST_ITEM_END_R, "\n\n");
+                } else {
+                    state.inline = true;
+                    adjustedContent = content
+                                      .replace(LIST_ITEM_END_R, "")
+                                      .replace("\t", '');
+                }
+
+                var result = parse(adjustedContent, state);
+                
                 // Restore our state before returning
                 state.inline = oldStateInline;
                 state._list = oldStateList;
@@ -884,7 +1043,6 @@ var defaultRules = {
                     key: i,
                     props: {
                         style: getStyle(i),
-                        scope: 'col',
                         children: output(content, state)
                     },
                     $$typeof: TYPE_SYMBOL,
@@ -956,7 +1114,7 @@ var defaultRules = {
 
             var headers = node.header.map(function(content, i) {
                 return htmlTag("th", output(content, state),
-                    { style: getStyle(i), scope: "col" });
+                    { style: getStyle(i) });
             }).join("");
 
             var rows = node.cells.map(function(row) {
@@ -1070,7 +1228,7 @@ var defaultRules = {
         parse: function(capture, parse, state) {
             var link ={
                 content: parse(capture[1], state),
-                target: unescapeUrl(capture[2]),
+                target: capture[2],
                 title: capture[3]
             };
             return link;
@@ -1104,7 +1262,7 @@ var defaultRules = {
         parse: function(capture, parse, state) {
             var image = {
                 alt: capture[1],
-                target: unescapeUrl(capture[2]),
+                target: capture[2],
                 title: capture[3]
             };
             return image;
@@ -1160,49 +1318,6 @@ var defaultRules = {
             });
         }
     },
-    em: {
-        match: inlineRegex(
-            new RegExp(
-                // only match _s surrounding words.
-                "^\\b_" +
-                "((?:__|\\\\[\\s\\S]|[^\\\\_])+?)_" +
-                "\\b" +
-                // Or match *s:
-                "|" +
-                // Only match *s that are followed by a non-space:
-                "^\\*(?=\\S)(" +
-                // Match at least one of:
-                //  - `**`: so that bolds inside italics don't close the
-                //          italics
-                //  - whitespace: followed by a non-* (we don't
-                //          want ' *' to close an italics--it might
-                //          start a list)
-                //  - non-whitespace, non-* characters
-                "(?:\\*\\*|\\s+(?:[^\\*\\s]|\\*\\*)|[^\\s\\*])+?" +
-                // followed by a non-space, non-* then *
-                ")\\*(?!\\*)"
-            )
-        ),
-        parse: function(capture, parse, state) {
-            return {
-                content: parse(capture[2] || capture[1], state)
-            };
-        },
-        react: function(node, output, state) {
-            return reactElement({
-                type: 'em',
-                key: state.key,
-                props: {
-                    children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
-        },
-        html: function(node, output, state) {
-            return htmlTag("em", output(node.content, state));
-        }
-    },
     strong: {
         match: inlineRegex(/^\*\*([\s\S]+?)\*\*(?!\*)/),
         parse: parseCaptureInline,
@@ -1237,6 +1352,49 @@ var defaultRules = {
         },
         html: function(node, output, state) {
             return htmlTag("u", output(node.content, state));
+        }
+    },
+    em: {
+        match: inlineRegex(
+            new RegExp(
+                // only match _s surrounding words.
+                "^\\b_" +
+                "((?:__|\\\\[\\s\\S]|[^\\\\_])+?)_" +
+                "\\b" +
+                // Or match *s:
+                "|" +
+                // Only match *s that are followed by a non-space:
+                "^\\*(?=\\S)(" +
+                // Match at least one of:
+                //  - `**`: so that bolds inside italics don't close the
+                //          italics
+                //  - whitespace: followed by a non-* (we don't
+                //          want ' *' to close an italics--it might
+                //          start a list)
+                //  - non-whitespace, non-* characters
+                "(?:\\*\\*|\\s+[^\\*\\s]|[^\\s\\*])+?" +
+                // followed by a non-space, non-* then *
+                ")\\*(?!\\*)"
+            )
+        ),
+        parse: function(capture, parse, state) {
+            return {
+                content: parse(capture[2] || capture[1], state)
+            };
+        },
+        react: function(node, output, state) {
+            return reactElement({
+                type: 'em',
+                key: state.key,
+                props: {
+                    children: output(node.content, state)
+                },
+                $$typeof: TYPE_SYMBOL,
+                _store: null,
+            });
+        },
+        html: function(node, output, state) {
+            return htmlTag("em", output(node.content, state));
         }
     },
     del: {
@@ -1301,10 +1459,11 @@ var defaultRules = {
         // We break on any symbol characters so that this grammar
         // is easy to extend without needing to modify this regex
         match: inlineRegex(
-            /^[\s\S]+?(?=[^0-9A-Za-z\s\u00c0-\uffff]|\n\n| {2,}\n|\w+:\S|$)/
+            /^[\s\S]+?(?=[^0-9A-Za-z\s\u00c0-\uffff]|\n\n| {2,}\n|\w+:\S|\t(?:[*+-]|\d+\.)|$)/
         ),
+        
         parse: function(capture, parse, state) {
-            return {
+             return {
                 content: capture[0]
             };
         },
@@ -1314,7 +1473,8 @@ var defaultRules = {
         html: function(node, output, state) {
             return node.content;
         }
-    }
+    },
+    
 };
 
 Object.keys(defaultRules).forEach(function(type, i) {
@@ -1380,7 +1540,6 @@ var SimpleMarkdown = {
 
     preprocess: preprocess,
     sanitizeUrl: sanitizeUrl,
-    unescapeUrl: unescapeUrl,
 
     // deprecated:
     defaultParse: defaultImplicitParse,
