@@ -1,10 +1,10 @@
 simple-markdown
 ===============
 
-[![Join the chat at https://gitter.im/Khan/simple-markdown](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/Khan/simple-markdown?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
 simple-markdown is a markdown-like parser designed for simplicity
 and extensibility.
+
+[Change log](https://github.com/Khan/simple-markdown/releases)
 
 Philosophy
 ----------
@@ -401,7 +401,7 @@ object must contain a `match` and a `parse` function.
 
 Takes a `rules` object, containing an `output` function for
 each rule, and a `key` into individual elements in that rules
-rules argument (either `'react''` or `'html'`, unless you are
+rules argument (either `'react'` or `'html'`, unless you are
 defining a custom output type), and returns a function that can
 output a single syntax tree node of any type that is in the
 `rules` object, given a node and a recursive output function.
@@ -446,22 +446,30 @@ default rules, which assume `inline` is false if it is
 undefined).
 
 ```javascript
-    var rules = SimpleMarkdown.defaultRules; // for example
+var rules = {
+    ...SimpleMarkdown.defaultRules,
+    paragraph: {
+        ...SimpleMarkdown.defaultRules.paragraph,
+        react: (node, output, state) => {
+            return <p key={state.key}>{output(node.content, state)}</p>;
+        }
+    }
+};
 
-    var parser = SimpleMarkdown.parserFor(rules);
-    var reactOutput = SimpleMarkdown.reactFor(SimpleMarkdown.ruleOutput(rules, 'react'));
-    var htmlOutput = SimpleMarkdown.reactFor(SimpleMarkdown.ruleOutput(rules, 'html'));
-    
-    var blockParseAndOutput = function(source) {
-        // Many rules require content to end in \n\n to be interpreted
-        // as a block.
-        var blockSource = source + "\n\n";
-        var parseTree = parser(blockSource, {inline: false});
-        var outputResult = htmlOutput(parseTree);
-        // Or for react output, use:
-        // var outputResult = reactOutput(parseTree);
-        return outputResult;
-    };
+var parser = SimpleMarkdown.parserFor(rules);
+var reactOutput = SimpleMarkdown.reactFor(SimpleMarkdown.ruleOutput(rules, 'react'));
+var htmlOutput = SimpleMarkdown.reactFor(SimpleMarkdown.ruleOutput(rules, 'html'));
+
+var blockParseAndOutput = function(source) {
+    // Many rules require content to end in \n\n to be interpreted
+    // as a block.
+    var blockSource = source + "\n\n";
+    var parseTree = parser(blockSource, {inline: false});
+    var outputResult = htmlOutput(parseTree);
+    // Or for react output, use:
+    // var outputResult = reactOutput(parseTree);
+    return outputResult;
+};
 ```
 
 Extension rules helper functions

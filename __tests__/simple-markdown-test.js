@@ -1,3 +1,5 @@
+// @flow
+
 var assert = require("assert");
 var _ = require("underscore");
 var React = require("react");
@@ -7,8 +9,17 @@ var SimpleMarkdown = require("../simple-markdown.js");
 var blockParse = SimpleMarkdown.defaultBlockParse;
 var inlineParse = SimpleMarkdown.defaultInlineParse;
 var implicitParse = SimpleMarkdown.defaultImplicitParse;
-var defaultOutput = SimpleMarkdown.defaultOutput;
+var defaultReactOutput = SimpleMarkdown.defaultReactOutput;
 var defaultHtmlOutput = SimpleMarkdown.defaultHtmlOutput;
+
+/*:: // Flow definitions & hackery
+
+var FLOW_IGNORE_COVARIANCE = {
+  console: {
+    warn: (console.warn : any),
+  },
+};
+*/
 
 // A pretty-printer that handles `undefined` and functions better
 // than JSON.stringify
@@ -40,10 +51,9 @@ var validateParse = function(parsed, expected) {
     }
 };
 
-var htmlThroughReact = function(parsed) {
-    var output = defaultOutput(parsed);
+var reactToHtml = function(reactElements) {
     var rawHtml = ReactDOMServer.renderToStaticMarkup(
-        React.DOM.div(null, output)
+        React.createElement('div', {}, reactElements)
     );
     var innerHtml = rawHtml
         .replace(/^<div>/, '')
@@ -53,6 +63,11 @@ var htmlThroughReact = function(parsed) {
         .replace(/\n*</g, '<')
         .replace(/\s+/g, ' ');
     return simplifiedHtml;
+};
+
+var htmlThroughReact = function(parsed) {
+    var output = defaultReactOutput(parsed);
+    return reactToHtml(output);
 };
 
 var htmlFromReactMarkdown = function(source) {
@@ -148,13 +163,32 @@ describe("simple markdown", function() {
             // not super important that it parses this like this, but
             // it should be a valid something...
             var parsed2 = inlineParse("~~~~~");
-            validateParse(parsed2, [{
+            validateParse(parsed2, [
+                { content: "~", type: "text" },
+                { content: "~", type: "text" },
+                { content: "~", type: "text" },
+                { content: "~", type: "text" },
+                { content: "~", type: "text" },
+            ]);
+        });
+
+        it("should support escapes in strikethrough", function() {
+            validateParse(inlineParse("~~hi\\~~ there~~"), [{
                 type: "del",
-                content: [{
-                    type: "text",
-                    content: "~"
-                }]
+                content: [
+                    { type: "text", content: "hi" },
+                    { type: "text", content: "~" },
+                    { type: "text", content: "~ there" },
+                ]
             }]);
+        });
+
+        it("should not allow strikethrough to contain non-closing ~~s", function() {
+            validateParse(inlineParse("~~hi ~~there~~"), [
+                { type: "text", content: "~" },
+                { type: "text", content: "~hi " },
+                { type: "del", content: [{ type: "text", content: "there" }] },
+            ]);
         });
 
         it("should parse underlines", function() {
@@ -302,7 +336,89 @@ describe("simple markdown", function() {
             }]);
         });
 
-        // TODO(aria): Make this pass:
+        it("should allow escaped asterisks in asterisk italics", function() {
+            var parsed1 = inlineParse("*hi\\* there*");
+            validateParse(parsed1, [{
+                type: "em",
+                content: [{
+                    type: "text",
+                    content: "hi",
+                }, {
+                    type: "text",
+                    content: "*",
+                }, {
+                    type: "text",
+                    content: " there",
+                }]
+            }]);
+
+            var parsed2 = inlineParse("_**ABC\\*DEF**_");
+            validateParse(parsed2, [{
+                type: "em",
+                content: [{
+                    type: "strong",
+                    content: [{
+                        type: "text",
+                        content: "ABC",
+                    }, {
+                        type: "text",
+                        content: "*",
+                    }, {
+                        type: "text",
+                        content: "DEF",
+                    }]
+                }]
+            }]);
+        });
+
+        it("should allow escaped asterisks in asterisk bolds", function() {
+            var parsed1 = inlineParse("**hi\\* there**");
+            validateParse(parsed1, [{
+                type: "strong",
+                content: [{
+                    type: "text",
+                    content: "hi",
+                }, {
+                    type: "text",
+                    content: "*",
+                }, {
+                    type: "text",
+                    content: " there",
+                }]
+            }]);
+
+            validateParse(inlineParse("**hi\\** there**"), [{
+                type: "strong",
+                content: [{
+                    type: "text",
+                    content: "hi",
+                }, {
+                    type: "text",
+                    content: "*",
+                }, {
+                    type: "text",
+                    content: "* there",
+                }]
+            }]);
+        });
+
+        it("should allow escaped underscores in underlines", function() {
+            var parsed1 = inlineParse("__hi\\__ there__");
+            validateParse(parsed1, [{
+                type: "u",
+                content: [{
+                    type: "text",
+                    content: "hi",
+                }, {
+                    type: "text",
+                    content: "_",
+                }, {
+                    type: "text",
+                    content: "_ there",
+                }]
+            }]);
+        });
+
         it("should parse complex combined bold/italics", function() {
             var parsed = inlineParse("***bold** italics*");
             validateParse(parsed, [{
@@ -330,6 +446,36 @@ describe("simple markdown", function() {
                     content: [{
                         type: "text",
                         content: "there you",
+                    }]
+                }]
+            }]);
+
+            var parsed3 = inlineParse("***like* this**");
+            validateParse(parsed3, [{
+                type: "strong",
+                content: [{
+                    type: "em",
+                    content: [{
+                        type: "text",
+                        content: "like",
+                    }]
+                }, {
+                    type: "text",
+                    content: " this",
+                }]
+            }]);
+
+            var parsed4 = inlineParse("**bold *and italics***");
+            validateParse(parsed4, [{
+                type: "strong",
+                content: [{
+                    type: "text",
+                    content: "bold ",
+                }, {
+                    type: "em",
+                    content: [{
+                        type: "text",
+                        content: "and italics",
                     }]
                 }]
             }]);
@@ -1918,6 +2064,38 @@ describe("simple markdown", function() {
                 ],
                 type: "list",
             }]);
+
+            var parsed = blockParse(
+                " * hi\n" +
+                "    * bye\n" +
+                "    * there\n\n"
+            );
+            validateParse(parsed, [{
+                ordered: false,
+                start: undefined,
+                items: [
+                    [{
+                        content: 'hi\n ', // NOTE(aria): The extra space here is
+                        type: 'text',     //  weird and we should consider fixing
+                    },
+                    {
+                        ordered: false,
+                        start: undefined,
+                        items: [
+                            [{
+                                content: "bye",
+                                type: "text",
+                            }],
+                            [{
+                                content: "there",
+                                type: "text",
+                            }],
+                        ],
+                        type: "list",
+                    }]
+                ],
+                type: "list",
+            }]);
         });
 
         it("should parse loose lists", function() {
@@ -2412,6 +2590,49 @@ describe("simple markdown", function() {
             );
         });
 
+        it("should parse empty table cells", function() {
+            var expected = [{
+                type: "table",
+                header: [
+                    [],
+                    [],
+                    []
+                ],
+                align: [null, null, null],
+                cells: [
+                    [
+                        [],
+                        [],
+                        []
+                    ],
+                    [
+                        [],
+                        [],
+                        []
+                    ]
+                ]
+            }];
+
+            var parsedPiped = blockParse(
+                "|    |    |    |\n" +
+                "| -- | -- | -- |\n" +
+                "|    |    |    |\n" +
+                "|    |    |    |\n" +
+                "\n"
+            );
+            validateParse(parsedPiped, expected);
+
+            var parsedNp = blockParse(
+                "   |    |   \n" +
+                "- | - | -\n" +
+                "   |    |   \n" +
+                "   |    |   \n" +
+                "\n"
+            );
+            validateParse(parsedNp, expected);
+        });
+
+
         it("should be able to parse <br>s", function() {
             // Inside a paragraph:
             var parsed = blockParse("hi  \nbye\n\n");
@@ -2563,6 +2784,14 @@ describe("simple markdown", function() {
                     };
                 }
             };
+            var strongRule = {
+                match: SimpleMarkdown.defaultRules.strong.match,
+                parse: function(capture, parse, state) {
+                    return {
+                        content: capture[1]
+                    };
+                }
+            };
             var textRule = _.extend({}, SimpleMarkdown.defaultRules.text, {
                 order: 10
             });
@@ -2700,7 +2929,9 @@ describe("simple markdown", function() {
             it("should output a warning for non-numeric orders", function() {
                 var oldconsolewarn = console.warn;
                 var warnings = [];
-                console.warn = function(warning) { warnings.push(warning); };
+                /*::FLOW_IGNORE_COVARIANCE.*/ console.warn = function(warning) {
+                    warnings.push(warning);
+                };
                 var parser1 = SimpleMarkdown.parserFor({
                     em1: _.extend({}, emRule, {
                         order: 1/0 - 1/0
@@ -2714,7 +2945,84 @@ describe("simple markdown", function() {
                     "simple-markdown: Invalid order for rule `em1`: NaN"
                 );
 
-                console.warn = oldconsolewarn;
+                /*::FLOW_IGNORE_COVARIANCE.*/ console.warn = oldconsolewarn;
+            });
+
+            it("should break ties with quality", function() {
+                var parser1 = SimpleMarkdown.parserFor({
+                    em1: _.extend({}, emRule, {
+                        order: 0,
+                        quality: function() { return 1; },
+                    }),
+                    em2: _.extend({}, emRule, {
+                        order: 0,
+                        quality: function() { return 2; },
+                    }),
+                    text: textRule
+                });
+
+                var parsed1 = parser1("_hi_", {inline: true});
+                validateParse(parsed1, [
+                    {content: "hi", type: "em2"},
+                ]);
+
+                // ...regardless of their order in the
+                // original rule definition
+                var parser2 = SimpleMarkdown.parserFor({
+                    em2: _.extend({}, emRule, {
+                        order: 0,
+                        quality: function() { return 2; },
+                    }),
+                    em1: _.extend({}, emRule, {
+                        order: 0,
+                        quality: function() { return 1; },
+                    }),
+                    text: textRule
+                });
+
+                var parsed2 = parser2("_hi_", {inline: true});
+                validateParse(parsed2, [
+                    {content: "hi", type: "em2"},
+                ]);
+            });
+
+            it("rules with quality should always win the tie", function() {
+                var parser1 = SimpleMarkdown.parserFor({
+                    em1: _.extend({}, emRule, {
+                        order: 0,
+                    }),
+                    em2: _.extend({}, emRule, {
+                        order: 0,
+                        quality: function() { return 2; },
+                    }),
+                    text: textRule
+                });
+
+                var parsed1 = parser1("_hi_", {inline: true});
+                validateParse(parsed1, [
+                    {content: "hi", type: "em2"},
+                ]);
+
+                // except if they don't match
+                var parser2 = SimpleMarkdown.parserFor({
+                    em: _.extend({}, emRule, {
+                        order: 0,
+                    }),
+                    strong: _.extend({}, strongRule, {
+                        order: 0,
+                        quality: function() { return 2; },
+                    }),
+                    text: textRule
+                });
+
+                var parsed2 = parser2("_hi_", {inline: true});
+                validateParse(parsed2, [
+                    {content: "hi", type: "em"},
+                ]);
+                var parsed2b = parser2("**hi**", {inline: true});
+                validateParse(parsed2b, [
+                    {content: "hi", type: "strong"},
+                ]);
             });
         });
 
@@ -2742,6 +3050,280 @@ describe("simple markdown", function() {
                 {content: "text", type: "text"},
             ]);
         });
+
+        it("should support [repeated] data extraction via mutating state", function() {
+            // This is sort of a more complex example than is necessary,  but I
+            // wanted to have some more in-depth tests, so here!
+            // This result counts the words in input/output through state, and also
+            // gives a flattened array result of the words.
+            var rules = {
+                Array: {
+                    result: function(arr, output, state) {
+                        return arr.map(function(node) {
+                            return output(node, state);
+                        }).filter(function(word) {
+                            return !!word;
+                        });
+                    },
+                },
+                word: {
+                    order: SimpleMarkdown.defaultRules.text.order - 1,
+                    match: function(source) {
+                        return /^\w+/.exec(source);
+                    },
+                    parse: function(capture, parse, state) {
+                        state.wordCount++;
+                        return {content: capture[0]};
+                    },
+                    result: function(node, output, state) {
+                        state.wordCount++;
+                        return node.content;
+                    },
+                },
+                delimiter: Object.assign({}, SimpleMarkdown.defaultRules.text, {
+                    match: function(source) {
+                        return /^\W+/.exec(source);
+                    },
+                    result: function(node, output, state) {
+                        return null;
+                    },
+                }),
+            };
+
+            var parse = SimpleMarkdown.parserFor(rules, {wordCount: 0});
+            var output = SimpleMarkdown.outputFor(rules, 'result', {wordCount: 0});
+
+            // test parsing
+            var parseState = {};
+            var ast1 = parse('hi here are some words', parseState);
+            assert.strictEqual(parseState.wordCount, 5);
+            // and repeated parsing
+            var ast2 = parse('hi here are some words', parseState);
+            assert.strictEqual(parseState.wordCount, 5);
+            assert.deepEqual(ast1, ast2);
+
+            // test output
+            var outputState = {};
+            var result1 = output(ast1, outputState);
+            assert.deepEqual(result1, ['hi', 'here', 'are', 'some', 'words']);
+            assert.strictEqual(outputState.wordCount, 5);
+            var result2 = output(ast2, outputState);
+            assert.strictEqual(outputState.wordCount, 5);
+            assert.deepEqual(result2, ['hi', 'here', 'are', 'some', 'words']);
+            assert.deepEqual(result1, result2);
+        });
+
+        it("should allow default state params in parserFor", function() {
+            var parser1 = SimpleMarkdown.parserFor(
+                {
+                    fancy: {
+                        order: SimpleMarkdown.defaultRules.text.order - 1,
+                        match: function(source) {
+                            return /^\w+/.exec(source);
+                        },
+                        parse: function(capture, parse, state) {
+                            var word = capture[0];
+                            var translated = state.lookup[word];
+                            if (translated) {
+                                return {content: translated};
+                            } else {
+                                return {content: word, type: 'text'};
+                            }
+                        },
+                    },
+                    text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
+                        match: function(source) {
+                            return /^\W+/.exec(source);
+                        },
+                    }),
+                },
+                {
+                    lookup: {
+                        "this": "thís",
+                        "is": "ìs",
+                        "text": "têxt"
+                    },
+                }
+            );
+
+            var parsed1 = parser1("this is some text", {inline: true});
+            validateParse(parsed1, [
+                {content: "thís", type: "fancy"},
+                {content: " ", type: "text"},
+                {content: "ìs", type: "fancy"},
+                {content: " ", type: "text"},
+                {content: "some", type: "text"},
+                {content: " ", type: "text"},
+                {content: "têxt", type: "fancy"},
+            ]);
+        });
+
+        it("should allow default state params in outputFor", function() {
+            var output = SimpleMarkdown.outputFor(
+                {
+                    Array: SimpleMarkdown.defaultRules.Array,
+                    text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
+                        react: function(node, output, state) {
+                            return React.createElement(
+                                state.TextComponent,
+                                {key: state.key},
+                                node.content
+                            );
+                        },
+                    }),
+                },
+                'react',
+                {
+                    // make all text bold
+                    TextComponent: 'b',
+                }
+            );
+
+            var parsed1 = inlineParse("this is some text");
+            var results1 = output(parsed1);
+
+            assert.strictEqual(
+                reactToHtml(results1),
+                '<b>this is some text</b>'
+            );
+        });
+
+        it("should not require passing state to recursiveParse", function() {
+            var parse = SimpleMarkdown.parserFor({
+                bracketed: {
+                    order: SimpleMarkdown.defaultRules.text.order - 1,
+                    match: function(source) {
+                        return /^\{((?:\\[\S\s]|[^\\\*])+)\}/.exec(source);
+                    },
+                    parse: function(capture, parse, state) {
+                        var result = {
+                            // note no passing state here:
+                            content: parse(capture[1]),
+                            token: state.token || 0,
+                        };
+                        state.token = (state.token || 0) + 1;
+                        return result;
+                    },
+                },
+                text: SimpleMarkdown.defaultRules.text,
+            }, {disableAutoBlockNewlines: true});
+
+            var parsed1 = parse('{outer {inner}}', {inline: true, token: 5327});
+
+            validateParse(parsed1, [{
+                type: 'bracketed',
+                content: [
+                    {
+                        type: 'text',
+                        content: 'outer ',
+                    },
+                    {
+                        type: 'bracketed',
+                        content: [{
+                            type: 'text',
+                            content: 'inner',
+                        }],
+                        token: 5327,
+                    }
+                ],
+                token: 5328,
+            }]);
+
+            // but shouldn't keep old state around between parses:
+            var parsed2 = parse('{outer {inner}}');
+
+            validateParse(parsed2, [{
+                type: 'bracketed',
+                content: [
+                    {
+                        type: 'text',
+                        content: 'outer ',
+                    },
+                    {
+                        type: 'bracketed',
+                        content: [{
+                            type: 'text',
+                            content: 'inner',
+                        }],
+                        token: 0,
+                    }
+                ],
+                token: 1,
+            }]);
+        });
+
+        it("should not require passing state to recursiveOutput", function() {
+            var output = SimpleMarkdown.outputFor({
+                Array: SimpleMarkdown.defaultRules.Array,
+                paragraph: Object.assign({}, SimpleMarkdown.defaultRules.paragraph, {
+                    html: function(node, output) {
+                        return '<p>' + output(node.content) + '</p>';
+                    },
+                }),
+                text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
+                    html: function(node, output, state) {
+                        return '<span class="' +
+                            (state.spanClass || 'default') +
+                            '">' +
+                            /*SimpleMarkdown.sanitizeText*/(node.content) +
+                            '</span>';
+                    },
+                }),
+            }, 'html');
+
+            var parsed1 = SimpleMarkdown.defaultBlockParse('hi there!');
+            var result1 = output(parsed1, {spanClass: 'special'});
+            assert.strictEqual(
+                result1,
+                '<p><span class="special">hi there!</span></p>'
+            );
+
+            // but shouldn't keep state around between outputs:
+            var parsed2 = SimpleMarkdown.defaultBlockParse('hi there!');
+            var result2 = output(parsed2);
+            assert.strictEqual(
+                result2,
+                '<p><span class="default">hi there!</span></p>'
+            );
+        });
+
+        it("should ignore null or undefined rules", function() {
+            var rules = {
+                Array: SimpleMarkdown.defaultRules.Array,
+                spoiler: {
+                    order: SimpleMarkdown.defaultRules.text.order - 1,
+                    match: function(source) {
+                        return /^\[\[((?:[^\]]|\][^\]])+)\]\]/.exec(source);
+                    },
+                    parse: function(capture, parse) {
+                        return {content: parse(capture[1])};
+                    },
+                    html: function(node, output) {
+                        return '<span style="background: black;">' +
+                            output(node.content) +
+                            '</span>';
+                    },
+                },
+                text: SimpleMarkdown.defaultRules.text,
+            };
+
+            var parse = SimpleMarkdown.parserFor(rules, {inline: true});
+            var output = SimpleMarkdown.outputFor(rules, 'html');
+
+            var parsed1 = parse('Hi this is a [[spoiler]]');
+            validateParse(parsed1, [
+                {type: 'text', content: 'Hi this is a '},
+                {
+                    type: 'spoiler', content: [
+                        {type: 'text', content: 'spoiler'},
+                    ]
+                },
+            ]);
+            var result1 = output(parsed1);
+            assert.strictEqual(result1,
+                'Hi this is a <span style="background: black;">spoiler</span>'
+            );
+        });
     });
 
     describe("react output", function() {
@@ -2757,6 +3339,34 @@ describe("simple markdown", function() {
             );
             assert.strictEqual(
                 html2,
+                "<div class=\"paragraph\"><a>link</a></div>"
+            );
+
+            var html3 = htmlFromReactMarkdown(
+                "[link](data:text/html;base64,PHNjcmlwdD5hbGVydCgnaGknKTwvc2NyaXB0Pg==)"
+            );
+            assert.strictEqual(html3, "<a>link</a>");
+
+            var html4 = htmlFromReactMarkdown(
+                "[link][1]\n\n" +
+                "[1]: data:text/html;base64,PHNjcmlwdD5hbGVydCgnaGknKTwvc2NyaXB0Pg==\n\n"
+            );
+            assert.strictEqual(
+                html4,
+                "<div class=\"paragraph\"><a>link</a></div>"
+            );
+
+            var html5 = htmlFromReactMarkdown(
+                "[link](vbscript:alert)"
+            );
+            assert.strictEqual(html5, "<a>link</a>");
+
+            var html6 = htmlFromReactMarkdown(
+                "[link][1]\n\n" +
+                "[1]: vbscript:alert\n\n"
+            );
+            assert.strictEqual(
+                html6,
                 "<div class=\"paragraph\"><a>link</a></div>"
             );
         });
@@ -2935,15 +3545,15 @@ describe("simple markdown", function() {
                 "\n",
                 '<table><thead>' +
                 '<tr>' +
-                '<th style="text-align:left;" scope="col">h1</th>' +
-                '<th style="text-align:center;" scope="col">h2</th>' +
-                '<th style="text-align:right;" scope="col">h3</th>' +
+                '<th style="text-align:left" scope="col">h1</th>' +
+                '<th style="text-align:center" scope="col">h2</th>' +
+                '<th style="text-align:right" scope="col">h3</th>' +
                 '</tr>' +
                 '</thead><tbody>' +
                 '<tr>' +
-                '<td style="text-align:left;">d1</td>' +
-                '<td style="text-align:center;">d2</td>' +
-                '<td style="text-align:right;">d3</td>' +
+                '<td style="text-align:left">d1</td>' +
+                '<td style="text-align:center">d2</td>' +
+                '<td style="text-align:right">d3</td>' +
                 '</tr>' +
                 '</tbody></table>'
             );
@@ -3049,7 +3659,6 @@ describe("simple markdown", function() {
             );
         });
 
-        // TODO(aria): Make this pass:
         it("should output complex combined bold/italics", function() {
             assertParsesToReact(
                 "***bold** italics*",
@@ -3087,6 +3696,33 @@ describe("simple markdown", function() {
             var elements = SimpleMarkdown.defaultReactOutput(parsed);
             assert.deepEqual(elements, ["hi, there!"]);
         });
+
+        it("should join text nodes before outputting them", function() {
+            var rules = Object.assign({}, SimpleMarkdown.defaultRules, {
+                text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
+                    react: function(node, output, state) {
+                        return React.createElement(
+                            'span',
+                            {key: state.key, className: 'text'},
+                            node.content
+                        );
+                    }
+                }),
+            });
+
+            var output = SimpleMarkdown.outputFor(rules, 'react');
+
+            var parsed = SimpleMarkdown.defaultInlineParse(
+                "Hi! You! Are! <3!"
+            );
+
+            var html = reactToHtml(output(parsed));
+
+            assert.strictEqual(
+                html,
+                '<span class="text">Hi! You! Are! &lt;3!</span>'
+            );
+        });
     });
 
     describe("html output", function() {
@@ -3101,6 +3737,32 @@ describe("simple markdown", function() {
                 "[1]: javascript:alert('hi');\n\n";
             assertParsesToHtml(
                 markdown2,
+                "<div class=\"paragraph\"><a>link</a></div>"
+            );
+
+            var markdown3 = "[link](data:text/html;base64,PHNjcmlwdD5hbGVydCgnaGknKTwvc2NyaXB0Pg==)";
+            assertParsesToHtml(
+                markdown3,
+                "<a>link</a>"
+            );
+
+            var markdown4 = "[link][1]\n\n" +
+                "[1]: data:text/html;base64,PHNjcmlwdD5hbGVydCgnaGknKTwvc2NyaXB0Pg==\n\n";
+            assertParsesToHtml(
+                markdown4,
+                "<div class=\"paragraph\"><a>link</a></div>"
+            );
+
+            var markdown5 = "[link](vbscript:alert)";
+            assertParsesToHtml(
+                markdown5,
+                "<a>link</a>"
+            );
+
+            var markdown6 = "[link][1]\n\n" +
+                "[1]: vbscript:alert\n\n";
+            assertParsesToHtml(
+                markdown6,
                 "<div class=\"paragraph\"><a>link</a></div>"
             );
         });
@@ -3393,7 +4055,6 @@ describe("simple markdown", function() {
             );
         });
 
-        // TODO(aria): Make this pass:
         it("should output complex combined bold/italics", function() {
             assertParsesToHtml(
                 "***bold** italics*",
@@ -3430,6 +4091,62 @@ describe("simple markdown", function() {
             var parsed = SimpleMarkdown.defaultInlineParse("hi, there!");
             var elements = SimpleMarkdown.defaultHtmlOutput(parsed);
             assert.deepEqual(elements, "hi, there!");
+        });
+    });
+
+    describe("convenience wrappers", function() {
+        describe("markdownToReact", function() {
+            it("should work on a basic 2 paragraph input", function() {
+                var elems = SimpleMarkdown.markdownToReact(
+                    "Hi there!\n\nYay!"
+                );
+
+                assert.strictEqual(reactToHtml(elems),
+                    '<div class="paragraph">Hi there!</div>' +
+                    '<div class="paragraph">Yay!</div>'
+                );
+            });
+        });
+
+        describe("markdownToHtml", function() {
+            it("should work on a basic 2 paragraph input", function() {
+                var html = SimpleMarkdown.markdownToHtml(
+                    "Hi there!\n\nYay!"
+                );
+
+                assert.strictEqual(html,
+                    '<div class="paragraph">Hi there!</div>' +
+                    '<div class="paragraph">Yay!</div>'
+                );
+            });
+        });
+
+        describe("ReactMarkdown component", function() {
+            it("should work on a basic 2 paragraph input", function() {
+                var elem = React.createElement(SimpleMarkdown.ReactMarkdown, {
+                    source: "Hi there!\n\nYay!"
+                });
+
+                assert.strictEqual(reactToHtml(elem), '<div>' +
+                    '<div class="paragraph">Hi there!</div>' +
+                    '<div class="paragraph">Yay!</div>' +
+                    '</div>'
+                );
+            });
+        });
+    });
+
+    describe("helper functions", function() {
+        describe("sanitizeText", function() {
+            it("should escape basic html", function() {
+                var result = SimpleMarkdown.sanitizeText(
+                    'hi <span class="my-class">there</span>'
+                );
+                assert.strictEqual(
+                    result,
+                    'hi &lt;span class=&quot;my-class&quot;&gt;there&lt;/span&gt;'
+                );
+            });
         });
     });
 });
