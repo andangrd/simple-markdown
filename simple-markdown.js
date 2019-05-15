@@ -20,7 +20,7 @@
  * the wonderful [marked.js](https://github.com/chjj/marked)
  *
  * LICENSE (MIT):
- * New code copyright (c) 2014 Khan Academy.
+ * New code copyright (c) 2014-2019 Khan Academy & Aria Buckles.
  *
  * Portions adapted from marked.js copyright (c) 2011-2014
  * Christopher Jeffrey (https://github.com/chjj/).
@@ -43,16 +43,226 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-(function() {
+
+/*::
+// Flow Type Definitions:
+
+type Capture =
+    Array<string> & {index: number} |
+    Array<string> & {index?: number};
+
+type Attr = string | number | boolean;
+
+type SingleASTNode = {
+    type: string,
+    [string]: any,
+};
+
+type UnTypedASTNode = {
+    [string]: any
+};
+
+type ASTNode = SingleASTNode | Array<SingleASTNode>;
+
+type State = {[string]: any};
+
+type ReactElement = React$Element<any>;
+type ReactElements = React$Node;
+
+type MatchFunction = (
+    source: string,
+    state: State,
+    prevCapture: string
+) => ?Capture;
+
+type Parser = (
+    source: string,
+    state?: ?State
+) => ASTNode;
+
+type ParseFunction = (
+    capture: Capture,
+    nestedParse: Parser,
+    state: State,
+) => (UnTypedASTNode | ASTNode);
+
+type SingleNodeParseFunction = (
+    capture: Capture,
+    nestedParse: Parser,
+    state: State,
+) => UnTypedASTNode;
+
+type Output<Result> = (
+    node: ASTNode,
+    state?: ?State
+) => Result;
+
+type NodeOutput<Result> = (
+    node: SingleASTNode,
+    nestedOutput: Output<Result>,
+    state: State
+) => Result;
+
+type ArrayNodeOutput<Result> = (
+    node: Array<SingleASTNode>,
+    nestedOutput: Output<Result>,
+    state: State
+) => Result;
+
+type ReactOutput = Output<ReactElements>;
+type ReactNodeOutput = NodeOutput<ReactElements>;
+type HtmlOutput = Output<string>;
+type HtmlNodeOutput = NodeOutput<string>;
+
+type ParserRule = {
+    +order: number,
+    +match: MatchFunction,
+    +quality?: (capture: Capture, state: State, prevCapture: string) => number,
+    +parse: ParseFunction,
+};
+
+type SingleNodeParserRule = {
+    +order: number,
+    +match: MatchFunction,
+    +quality?: (capture: Capture, state: State, prevCapture: string) => number,
+    +parse: SingleNodeParseFunction,
+};
+
+type ReactOutputRule = {
+    // we allow null because some rules are never output results, and that's
+    // legal as long as no parsers return an AST node matching that rule.
+    // We don't use ? because this makes it be explicitly defined as either
+    // a valid function or null, so it can't be forgotten.
+    +react: ReactNodeOutput | null,
+};
+
+type HtmlOutputRule = {
+    +html: HtmlNodeOutput | null,
+};
+
+type ArrayRule = {
+    +react?: ArrayNodeOutput<ReactElements>,
+    +html?: ArrayNodeOutput<string>,
+    +[string]: ArrayNodeOutput<any>,
+};
+
+type ParserRules = {
+    +Array?: ArrayRule,
+    +[type: string]: ParserRule,
+};
+
+type OutputRules<Rule> = {
+    +Array?: ArrayRule,
+    +[type: string]: Rule
+};
+type Rules<OutputRule> = {
+    +Array?: ArrayRule,
+    +[type: string]: ParserRule & OutputRule,
+}
+type ReactRules = {
+    +Array?: {
+        +react: ArrayNodeOutput<ReactElements>,
+    },
+    +[type: string]: ParserRule & ReactOutputRule,
+};
+type HtmlRules = {
+    +Array?: {
+        +html: ArrayNodeOutput<string>,
+    },
+    +[type: string]: ParserRule & HtmlOutputRule,
+};
+
+// We want to clarify our defaultRules types a little bit more so clients can
+// reuse defaultRules built-ins. So we make some stronger guarantess when
+// we can:
+type NonNullReactOutputRule = {
+    +react: ReactNodeOutput,
+};
+type ElementReactOutputRule = {
+    +react: NodeOutput<ReactElement>,
+};
+type TextReactOutputRule = {
+    +react: NodeOutput<string>,
+};
+type NonNullHtmlOutputRule = {
+    +html: HtmlNodeOutput,
+};
+
+type DefaultInRule = SingleNodeParserRule & ReactOutputRule & HtmlOutputRule;
+type TextInOutRule = SingleNodeParserRule & TextReactOutputRule & NonNullHtmlOutputRule;
+type LenientInOutRule = SingleNodeParserRule & NonNullReactOutputRule & NonNullHtmlOutputRule;
+type DefaultInOutRule = SingleNodeParserRule & ElementReactOutputRule & NonNullHtmlOutputRule;
+
+type DefaultRules = {
+    +Array: {
+        +react: ArrayNodeOutput<ReactElements>,
+        +html: ArrayNodeOutput<string>
+    },
+    +heading: DefaultInOutRule,
+    +nptable: DefaultInRule,
+    +lheading: DefaultInRule,
+    +hr: DefaultInOutRule,
+    +codeBlock: DefaultInOutRule,
+    +fence: DefaultInRule,
+    +blockQuote: DefaultInOutRule,
+    +list: DefaultInOutRule,
+    +def: LenientInOutRule,
+    +table: DefaultInOutRule,
+    +newline: TextInOutRule,
+    +paragraph: DefaultInOutRule,
+    +escape: DefaultInRule,
+    +autolink: DefaultInRule,
+    +mailto: DefaultInRule,
+    +url: DefaultInRule,
+    +link: DefaultInOutRule,
+    +image: DefaultInOutRule,
+    +reflink: DefaultInRule,
+    +refimage: DefaultInRule,
+    +em: DefaultInOutRule,
+    +strong: DefaultInOutRule,
+    +u: DefaultInOutRule,
+    +del: DefaultInOutRule,
+    +inlineCode: DefaultInOutRule,
+    +br: DefaultInOutRule,
+    +text: TextInOutRule,
+};
+
+type RefNode = {
+    type: string,
+    content?: ASTNode,
+    target?: string,
+    title?: string,
+};
+
+// End Flow Definitions
+*/
+
+// Open IIFE, and immediately close it in flow
+(function() { /*::})*/
 
 var CR_NEWLINE_R = /\r\n?/g;
 var TAB_R = /\t/g;
-var FORMFEED_R = /\f/g
+var FORMFEED_R = /\f/g;
 // Turn various crazy whitespace into easy to process things
-var preprocess = function(source) {
+var preprocess = function(source /* : string */) {
     return source.replace(CR_NEWLINE_R, '\n')
             .replace(FORMFEED_R, '')
-            .replace(TAB_R, '\t');
+            .replace(TAB_R, '    ');
+};
+
+var populateInitialState = function(
+    givenState /* : ?State */,
+    defaultState /* : ?State */
+) /* : State */{
+    var state /* : State */ = givenState || {};
+    if (defaultState != null) {
+        for (var prop in defaultState) {
+            if (Object.prototype.hasOwnProperty.call(defaultState, prop)) {
+                state[prop] = defaultState[prop];
+            }
+        }
+    }
+    return state;
 };
 
 /**
@@ -74,28 +284,41 @@ var preprocess = function(source) {
  *     some nesting is. For an example use-case, see passage-ref
  *     parsing in src/widgets/passage/passage-markdown.jsx
  */
-var parserFor = function(rules) {
+var parserFor = function(rules /*: ParserRules */, defaultState /*: ?State */) {
     // Sorts rules in order of increasing order, then
     // ascending rule name in case of ties.
-    var ruleList = Object.keys(rules);
-    ruleList.forEach(function(type) {
-        var order = rules[type].order;
+    var ruleList = Object.keys(rules).filter(function(type) {
+        var rule = rules[type];
+        if (rule == null || rule.match == null) {
+            return false;
+        }
+        var order = rule.order;
         if ((typeof order !== 'number' || !isFinite(order)) &&
                 typeof console !== 'undefined') {
             console.warn(
                 "simple-markdown: Invalid order for rule `" + type + "`: " +
-                order
+                String(order)
             );
         }
+        return true;
     });
 
     ruleList.sort(function(typeA, typeB) {
-        var orderA = rules[typeA].order;
-        var orderB = rules[typeB].order;
+        var ruleA /* : ParserRule */ = /*::(*/ rules[typeA] /*:: :any)*/;
+        var ruleB /* : ParserRule */ = /*::(*/ rules[typeB] /*:: :any)*/;
+        var orderA = ruleA.order;
+        var orderB = ruleB.order;
 
         // First sort based on increasing order
         if (orderA !== orderB) {
             return orderA - orderB;
+        }
+
+        var secondaryOrderA = ruleA.quality ? 0 : 1;
+        var secondaryOrderB = ruleB.quality ? 0 : 1;
+
+        if (secondaryOrderA !== secondaryOrderB) {
+            return secondaryOrderA - secondaryOrderB;
 
         // Then based on increasing unicode lexicographic ordering
         } else if (typeA < typeB) {
@@ -110,68 +333,134 @@ var parserFor = function(rules) {
         }
     });
 
-    var nestedParse = function(source, state) {
+    var latestState;
+    var nestedParse = function(source /* : string */, state /* : ?State */) {
         var result = [];
-        state = state || {};
+        state = state || latestState;
+        latestState = state;
         // We store the previous capture so that match functions can
         // use some limited amount of lookbehind. Lists use this to
         // ensure they don't match arbitrary '- ' or '* ' in inline
         // text (see the list rule for more information).
         var prevCapture = "";
         while (source) {
+            // store the best match, it's rule, and quality:
+            var ruleType = null;
+            var rule = null;
+            var capture = null;
+            var quality = NaN;
+
+            // loop control variables:
             var i = 0;
-            while (i < ruleList.length) {
-                var ruleType = ruleList[i];
-                var rule = rules[ruleType];
-                
-                var capture;
-                if (rule.match) {
-                    capture = rule.match(source, state, prevCapture);
-                } else {
-                    capture = rule.regex.exec(source);
-                }
-                if (capture) {
-                    var currCaptureString = capture[0];
-                    source = source.substring(currCaptureString.length);
-                    var parsed = rule.parse(capture, nestedParse, state);
-                    // We maintain the same object here so that rules can
-                    // store references to the objects they return and
-                    // modify them later. (oops sorry! but this adds a lot
-                    // of power--see reflinks.)
-                    // We also let rules override the default type of
-                    // their parsed node if they would like to, so that
-                    // there can be a single output function for all links,
-                    // even if there are several rules to parse them.
-                    if (parsed.type == null) {
-                        parsed.type = ruleType;
+            var currRuleType = ruleList[0];
+            var currRule /* : ParserRule */ = /*::(*/ rules[currRuleType] /*:: : any)*/;
+
+            do {
+                var currOrder = currRule.order;
+                var currCapture = currRule.match(source, state, prevCapture);
+
+                if (currCapture) {
+                    var currQuality = currRule.quality ? currRule.quality(
+                        currCapture,
+                        state,
+                        prevCapture
+                    ) : 0;
+                    // This should always be true the first time because
+                    // the initial quality is NaN (that's why there's the
+                    // condition negation).
+                    if (!(currQuality <= quality)) {
+                        ruleType = currRuleType;
+                        rule = currRule;
+                        capture = currCapture;
+                        quality = currQuality;
                     }
-                    result.push(parsed);
-
-                    prevCapture = currCaptureString;
-                    break;
                 }
+
+                // Move on to the next item.
+                // Note that this makes `currRule` be the next item
                 i++;
+                currRuleType = ruleList[i];
+                currRule = /*::((*/ rules[currRuleType] /*:: : any) : ParserRule)*/;
+
+            } while (
+                // keep looping while we're still within the ruleList
+                currRule && (
+                    // if we don't have a match yet, continue
+                    !capture || (
+                        // or if we have a match, but the next rule is
+                        // at the same order, and has a quality measurement
+                        // functions, then this rule must have a quality
+                        // measurement function (since they are sorted before
+                        // those without), and we need to check if there is
+                        // a better quality match
+                        currRule.order === currOrder &&
+                        currRule.quality
+                    )
+                )
+            );
+
+            // TODO(aria): Write tests for these
+            // Lie to flow and say these checks always happen
+            if (state.disableErrorGuards !== true) { /*:: } { */
+                if (rule == null || capture == null /*:: || ruleType == null */) {
+                    throw new Error(
+                        "Could not find a matching rule for the below " +
+                        "content. The rule with highest `order` should " +
+                        "always match content provided to it. Check " +
+                        "the definition of `match` for '" +
+                        ruleList[ruleList.length - 1] +
+                        "'. It seems to not match the following source:\n" +
+                        source
+                    );
+                }
+                if (capture.index !== 0 &&
+                    source.slice(0, capture[0].length) !== capture[0]
+                ) {
+                    throw new Error(
+                        "`match` must return a capture starting at index 0 " +
+                        "(the current parse index). Did you forget a ^ at the " +
+                        "start of the RegExp?"
+                    );
+                }
             }
 
-            // TODO(aria): Write tests for this
-            if (i === ruleList.length) {
-                throw new Error(
-                    "could not find rule to match content: " + source
-                );
+            var parsed = rule.parse(capture, nestedParse, state);
+            // We maintain the same object here so that rules can
+            // store references to the objects they return and
+            // modify them later. (oops sorry! but this adds a lot
+            // of power--see reflinks.)
+            if (Array.isArray(parsed)) {
+                Array.prototype.push.apply(result, parsed);
+            } else {
+                // We also let rules override the default type of
+                // their parsed node if they would like to, so that
+                // there can be a single output function for all links,
+                // even if there are several rules to parse them.
+                if (parsed.type == null) {
+                    parsed.type = ruleType;
+                }
+                result.push(parsed);
             }
+
+            prevCapture = capture[0];
+            source = source.substring(prevCapture.length);
         }
         return result;
     };
 
-    var outerParse = function(source, state) {
-        return nestedParse(preprocess(source), state);
+    var outerParse = function(source /* : string */, state /* : ?State */) {
+        latestState = populateInitialState(state, defaultState);
+        if (!latestState.inline && !latestState.disableAutoBlockNewlines) {
+            source = source + "\n\n";
+        }
+        return nestedParse(preprocess(source), latestState);
     };
     return outerParse;
 };
 
 // Creates a match function for an inline scoped element from a regex
-var inlineRegex = function(regex) {
-    var match = function(source, state) {
+var inlineRegex = function(regex /* : RegExp */) {
+    var match /* : MatchFunction */ = function(source, state) {
         if (state.inline) {
             return regex.exec(source);
         } else {
@@ -183,8 +472,8 @@ var inlineRegex = function(regex) {
 };
 
 // Creates a match function for a block scoped element from a regex
-var blockRegex = function(regex) {
-    var match = function(source, state) {
+var blockRegex = function(regex /* : RegExp */) {
+    var match /* : MatchFunction */ = function(source, state) {
         if (state.inline) {
             return null;
         } else {
@@ -196,57 +485,12 @@ var blockRegex = function(regex) {
 };
 
 // Creates a match function from a regex, ignoring block/inline scope
-var anyScopeRegex = function(regex) {
-    var match = function(source, state) {
+var anyScopeRegex = function(regex /* : RegExp */) {
+    var match /* : MatchFunction */ = function(source, state) {
         return regex.exec(source);
     };
     match.regex = regex;
     return match;
-};
-
-var reactFor = function(outputFunc) {
-    var nestedOutput = function(ast, state) {
-        state = state || {};
-        if (Array.isArray(ast)) {
-            var oldKey = state.key;
-            var result = [];
-
-            // map nestedOutput over the ast, except group any text
-            // nodes together into a single string output.
-            var lastWasString = false;
-            for (var i = 0; i < ast.length; i++) {
-                state.key = i;
-                var nodeOut = nestedOutput(ast[i], state);
-                var isString = (typeof nodeOut === "string");
-                if (isString && lastWasString) {
-                    result[result.length - 1] += nodeOut;
-                } else {
-                    result.push(nodeOut);
-                }
-                lastWasString = isString;
-            }
-
-            state.key = oldKey;
-            return result;
-        } else {
-            return outputFunc(ast, nestedOutput, state);
-        }
-    };
-    return nestedOutput;
-};
-
-var htmlFor = function(outputFunc) {
-    var nestedOutput = function(ast, state) {
-        state = state || {};
-        if (Array.isArray(ast)) {
-            return ast.map(function(node) {
-                return nestedOutput(node, state);
-            }).join("");
-        } else {
-            return outputFunc(ast, nestedOutput, state);
-        }
-    };
-    return nestedOutput;
 };
 
 var TYPE_SYMBOL =
@@ -254,35 +498,20 @@ var TYPE_SYMBOL =
      Symbol.for('react.element')) ||
     0xeac7;
 
-var reactElement = function(element) {
-    // Debugging assertions. To be commented out when committed
-    // TODO(aria): Figure out a better way of having dev asserts
-/*
-    if (typeof element.props !== "object") {
-        throw new Error("props of " + element.type + " must be an object");
-    }
-    if (!element.$$typeof) {
-        throw new Error(
-            "must set $$typeof on element " +
-            element.type
-        );
-    }
-    if (element._store !== null) { // === because we don't want to count
-                                   // undefined here
-        throw new Error(
-            "must set _store to null on element " +
-            element.type
-        );
-    }
-*/
-
-    // This should just override an already present element._store, which
-    // exists so that the class of this object doesn't change in V8
-    element._store = {
-        validated: true,
-        originalProps: element.props
+var reactElement = function(
+    type /* : string */,
+    key /* : string | null */,
+    props /* : { [string]: any } */
+) {
+    var element = {
+        $$typeof: TYPE_SYMBOL,
+        type: type,
+        key: key,
+        ref: null,
+        props: props,
+        _owner: null
     };
-    return element;
+    return /* :: (( */ element /* :: : any ) : ReactElement) */;
 };
 
 // Returns a closed HTML tag.
@@ -292,16 +521,24 @@ var reactElement = function(element) {
 //   eg. { "href": "http://google.com" }. Falsey attributes are filtered out.
 // isClosed: boolean that controls whether tag is closed or not (eg. img tags).
 //   defaults to true
-var htmlTag = function(tagName, content, attributes, isClosed) {
+var htmlTag = function(
+    tagName /* : string */,
+    content /* : string */,
+    attributes /* : ?{[any]: ?Attr} */,
+    isClosed /* : ?boolean */
+) {
     attributes = attributes || {};
     isClosed = typeof isClosed !== 'undefined' ? isClosed : true;
 
     var attributeString = "";
     for (var attr in attributes) {
+        var attribute = attributes[attr];
         // Removes falsey attributes
         if (Object.prototype.hasOwnProperty.call(attributes, attr) &&
-                attributes[attr]) {
-            attributeString += " " + attr + '="' + attributes[attr] + '"';
+                attribute) {
+            attributeString += " " +
+                sanitizeText(attr) + '="' +
+                sanitizeText(attribute) + '"';
         }
     }
 
@@ -316,7 +553,7 @@ var htmlTag = function(tagName, content, attributes, isClosed) {
 
 var EMPTY_PROPS = {};
 
-var sanitizeUrl = function(url) {
+var sanitizeUrl = function(url /* : ?string */) {
     if (url == null) {
         return null;
     }
@@ -324,7 +561,7 @@ var sanitizeUrl = function(url) {
         var prot = decodeURIComponent(url)
             .replace(/[^A-Za-z0-9/:]/g, '')
             .toLowerCase();
-        if (prot.indexOf('javascript:') === 0) {
+        if (prot.indexOf('javascript:') === 0 || prot.indexOf('vbscript:') === 0 || prot.indexOf('data:') === 0) {
             return null;
         }
     } catch (e) {
@@ -334,6 +571,28 @@ var sanitizeUrl = function(url) {
         return null;
     }
     return url;
+};
+
+var SANITIZE_TEXT_R = /[<>&"']/g;
+var SANITIZE_TEXT_CODES = {
+    '<': '&lt;',
+    '>': '&gt;',
+    '&': '&amp;',
+    '"': '&quot;',
+    "'": '&#x27;',
+    '/': '&#x2F;',
+    "`": '&#96;'
+};
+var sanitizeText = function(text /* : Attr */) {
+    return String(text).replace(SANITIZE_TEXT_R, function(chr) {
+        return SANITIZE_TEXT_CODES[chr];
+    });
+};
+
+var UNESCAPE_URL_R = /\\([^0-9A-Za-z\s])/g;
+
+var unescapeUrl = function(rawUrlString /* : string */) {
+    return rawUrlString.replace(UNESCAPE_URL_R, "$1");
 };
 
 // Parse some content with the parser `parse`, with state.inline
@@ -365,15 +624,8 @@ var ignoreCapture = function() { return {}; };
 var LIST_BULLET = "(?:[*+-]|\\d+\\.)";
 // recognize the start of a list item:
 // leading space plus a bullet plus a space (`   * `)
-var LIST_ITEM_PREFIX = "( *)((|\\t)"+ LIST_BULLET + ") +";
-var LIST_ITEM_PREFIX_OR_CLAUSE = "( *)((\\t)"+ LIST_BULLET + ") +";
-var LIST_ITEM_PREFIX_LEVEL_1 = "( *)("+ LIST_BULLET +" ) +";
-var SUB_LIST_ITEM_PREFIX = "( *)(\\t" + LIST_BULLET + ") +";
-
-var LIST_ITEM_PREFIX_LEVEL_1_R = new RegExp("^" + LIST_ITEM_PREFIX_LEVEL_1);
+var LIST_ITEM_PREFIX = "( *)(" + LIST_BULLET + ") +";
 var LIST_ITEM_PREFIX_R = new RegExp("^" + LIST_ITEM_PREFIX);
-var SUB_LIST_ITEM_PREFIX_R = new RegExp("^" + SUB_LIST_ITEM_PREFIX);
-
 // recognize an individual list item:
 //  * hi
 //    this is part of the same item
@@ -381,30 +633,13 @@ var SUB_LIST_ITEM_PREFIX_R = new RegExp("^" + SUB_LIST_ITEM_PREFIX);
 //    as is this, which is a new paragraph in the same item
 //
 //  * but this is not part of the same item
-
-var LIST_ITEM = "(( *)((\\t)(?:[*+-]|\\d+\\.)) +" + 
-               "[^\\n]*(?:\\n(?!(\\t)\\1(?:[*+-]|\\d+\\.)))*" +
-               "(?:[\\n*a-z\\s\\W]|([*+-]|\\d(?!\\. )))*)*(\\t{2,}\\n)" +
-               "|(( *)((|\\t)(?:[*+-]|\\d+\\.)) +[^\\n]*" +
-               "(?:\\n(?!(\\t)\\1(?:[*+-]|\\d+\\.)))*[\\n]*)";
-
-var LIST_ITEM_R = new RegExp(LIST_ITEM,"gm");
-var SUB_LIST_ITEM_R = new RegExp(
-    SUB_LIST_ITEM_PREFIX +
-    "[^\\n]*(?:\\n\\t" +
+var LIST_ITEM_R = new RegExp(
+    LIST_ITEM_PREFIX +
+    "[^\\n]*(?:\\n" +
     "(?!\\1" + LIST_BULLET + " )[^\\n]*)*(\n|$)",
     "gm"
 );
-
-var IS_SUB_LIST_R = /( *)(\t)((?:[*+-]|\d+\.)) [^\n]*(?:\n(?!(|\t)\1(?:[*+-]|\d+\.))[^\n]*)*(\n|$)/;
-var SUB_LIST_MATCH_CONDITION = /( *)([\s\S]*\n(\t(?:[*+-]|\d+\.))|(\t(?:[*+-]|\d+\.))) [\s\S]+?(?:\t{2,}(?! )(?!\1(?:[*+-]|\d+\.) )*|\s*\n*$)/;
-
-var LIST_ITEM_R_STR = LIST_ITEM_PREFIX +
-    "[^\\n]*(?:\\n\\t" +
-    "(?!\\1" + LIST_BULLET + " )[^\\n]*)*(\n|$)";
-
 var BLOCK_END_R = /\n{2,}$/;
-
 // recognize the end of a paragraph block inside a list item:
 // two or more newlines at end end of the item
 var LIST_BLOCK_END_R = BLOCK_END_R;
@@ -417,21 +652,18 @@ var LIST_R = new RegExp(
     "(?!\\1" + LIST_BULLET + " )\\n*" +
     // the \\s*$ here is so that we can parse the inside of nested
     // lists, where our content might end before we receive two `\n`s
-    "|\\s*\\n*$)"
+    "|\\s*\n*$)"
 );
-
-var LIST_LOOKBEHIND_R = /^$|\n *$/;
+var LIST_LOOKBEHIND_R = /(?:^|\n)( *)$/;
 
 var TABLES = (function() {
     // predefine regexes so we don't have to create them inside functions
     // sure, regex literals should be fast, even inside functions, but they
     // aren't in all browsers.
     var TABLE_HEADER_TRIM = /^ *| *\| *$/g;
-    var TABLE_ALIGN_TRIM = /^ *|\| *$/g;
-
-    var TABLE_CELLS_TRIM = /(?: *\| *)?\n$/;
-    var NPTABLE_CELLS_TRIM = /\n$/;
+    var TABLE_CELLS_TRIM = /\n+$/;
     var PLAIN_TABLE_ROW_TRIM = /^ *\| *| *\| *$/g;
+    var NPTABLE_ROW_TRIM = /^ *| *$/g;
     var TABLE_ROW_SPLIT = / *\| */;
 
     var TABLE_RIGHT_ALIGN = /^ *-+: *$/;
@@ -450,18 +682,18 @@ var TABLES = (function() {
         }
     };
 
-    var parseTableHeader = function(capture, parse, state) {
+    var parseTableHeader = function(trimRegex, capture, parse, state) {
         var headerText = capture[1]
-            .replace(TABLE_HEADER_TRIM, "")
+            .replace(trimRegex, "")
             .split(TABLE_ROW_SPLIT);
         return headerText.map(function(text) {
             return parse(text, state);
         });
     };
 
-    var parseTableAlign = function(capture, parse, state) {
+    var parseTableAlign = function(trimRegex, capture, parse, state) {
         var alignText = capture[2]
-            .replace(TABLE_ALIGN_TRIM, "")
+            .replace(trimRegex, "")
             .split(TABLE_ROW_SPLIT);
 
         return alignText.map(parseTableAlignCapture);
@@ -484,7 +716,7 @@ var TABLES = (function() {
 
     var parseNpTableCells = function(capture, parse, state) {
         var rowsText = capture[3]
-            .replace(NPTABLE_CELLS_TRIM, "")
+            .replace(TABLE_CELLS_TRIM, "")
             .split("\n");
 
         return rowsText.map(function(rowText) {
@@ -497,8 +729,8 @@ var TABLES = (function() {
 
     var parseTable = function(capture, parse, state) {
         state.inline = true;
-        var header = parseTableHeader(capture, parse, state);
-        var align = parseTableAlign(capture, parse, state);
+        var header = parseTableHeader(TABLE_HEADER_TRIM, capture, parse, state);
+        var align = parseTableAlign(TABLE_HEADER_TRIM, capture, parse, state);
         var cells = parseTableCells(capture, parse, state);
         state.inline = false;
 
@@ -512,8 +744,8 @@ var TABLES = (function() {
 
     var parseNpTable = function(capture, parse, state) {
         state.inline = true;
-        var header = parseTableHeader(capture, parse, state);
-        var align = parseTableAlign(capture, parse, state);
+        var header = parseTableHeader(NPTABLE_ROW_TRIM, capture, parse, state);
+        var align = parseTableAlign(NPTABLE_ROW_TRIM, capture, parse, state);
         var cells = parseNpTableCells(capture, parse, state);
         state.inline = false;
 
@@ -532,12 +764,12 @@ var TABLES = (function() {
     };
 })();
 
-var LINK_INSIDE = "(?:\\[[^\\]]*\\]|[^\\]]|\\](?=[^\\[]*\\]))*";
+var LINK_INSIDE = "(?:\\[[^\\]]*\\]|[^\\[\\]]|\\](?=[^\\[]*\\]))*";
 var LINK_HREF_AND_TITLE =
-        "\\s*<?([^\\s]*?)>?(?:\\s+['\"]([\\s\\S]*?)['\"])?\\s*";
+        "\\s*<?((?:[^\\s\\\\]|\\\\.)*?)>?(?:\\s+['\"]([\\s\\S]*?)['\"])?\\s*";
 var AUTOLINK_MAILTO_CHECK_R = /mailto:/i;
 
-var parseRef = function(capture, state, refNode) {
+var parseRef = function(capture, state, refNode /* : RefNode */) {
     var ref = (capture[2] || capture[1])
         .replace(/\s+/g, ' ')
         .toLowerCase();
@@ -568,8 +800,57 @@ var parseRef = function(capture, state, refNode) {
     return refNode;
 };
 
-var defaultRules = {
+var currOrder = 0;
+var defaultRules /* : DefaultRules */ = {
+    Array: {
+        react: function(arr, output, state) {
+            var oldKey = state.key;
+            var result /* : Array<ReactElements> */ = [];
+
+            // map output over the ast, except group any text
+            // nodes together into a single string output.
+            for (var i = 0, key = 0; i < arr.length; i++, key++) {
+                // `key` is our numerical `state.key`, which we increment for
+                // every output node, but don't change for joined text nodes.
+                // (i, however, must change for joined text nodes)
+                state.key = '' + i;
+
+                var node = arr[i];
+                if (node.type === 'text') {
+                    node = { type: 'text', content: node.content };
+                    for (; i + 1 < arr.length && arr[i + 1].type === 'text'; i++) {
+                        node.content += arr[i + 1].content;
+                    }
+                }
+
+                result.push(output(node, state));
+            }
+
+            state.key = oldKey;
+            return result;
+        },
+        html: function(arr, output, state) {
+            var result = "";
+
+            // map output over the ast, except group any text
+            // nodes together into a single string output.
+            for (var i = 0, key = 0; i < arr.length; i++) {
+
+                var node = arr[i];
+                if (node.type === 'text') {
+                    node = { type: 'text', content: node.content };
+                    for (; i + 1 < arr.length && arr[i + 1].type === 'text'; i++) {
+                        node.content += arr[i + 1].content;
+                    }
+                }
+
+                result += output(node, state);
+            }
+            return result;
+        }
+    },
     heading: {
+        order: currOrder++,
         match: blockRegex(/^ *(#{1,6}) *([^\n]+?) *#* *(?:\n *)+\n/),
         parse: function(capture, parse, state) {
             return {
@@ -578,27 +859,27 @@ var defaultRules = {
             };
         },
         react: function(node, output, state) {
-            return reactElement({
-                type: 'h' + node.level,
-                key: state.key,
-                props: {
+            return reactElement(
+                'h' + node.level,
+                state.key,
+                {
                     children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null
-            });
+                }
+            );
         },
         html: function(node, output, state) {
             return htmlTag("h" + node.level, output(node.content, state));
         }
     },
     nptable: {
+        order: currOrder++,
         match: blockRegex(TABLES.NPTABLE_REGEX),
-        // For perseus-markdown temporary backcompat:
-        regex: TABLES.NPTABLE_REGEX,
-        parse: TABLES.parseNpTable
+        parse: TABLES.parseNpTable,
+        react: null,
+        html: null
     },
     lheading: {
+        order: currOrder++,
         match: blockRegex(/^([^\n]+)\n *(=|-){3,} *(?:\n *)+\n/),
         parse: function(capture, parse, state) {
             return {
@@ -606,25 +887,27 @@ var defaultRules = {
                 level: capture[2] === '=' ? 1 : 2,
                 content: parseInline(parse, capture[1], state)
             };
-        }
+        },
+        react: null,
+        html: null
     },
     hr: {
+        order: currOrder++,
         match: blockRegex(/^( *[-*_]){3,} *(?:\n *)+\n/),
         parse: ignoreCapture,
         react: function(node, output, state) {
-            return reactElement({
-                type: 'hr',
-                key: state.key,
-                props: EMPTY_PROPS,
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+            return reactElement(
+                'hr',
+                state.key,
+                EMPTY_PROPS
+            );
         },
         html: function(node, output, state) {
             return "<hr>";
         }
     },
     codeBlock: {
+        order: currOrder++,
         match: blockRegex(/^(?:    [^\n]+\n*)+(?:\n *)+\n/),
         parse: function(capture, parse, state) {
             var content = capture[0]
@@ -640,36 +923,34 @@ var defaultRules = {
                 "markdown-code-" + node.lang :
                 undefined;
 
-            return reactElement({
-                type: 'pre',
-                key: state.key,
-                props: {
-                    children: reactElement({
-                        type: 'code',
-                        props: {
+            return reactElement(
+                'pre',
+                state.key,
+                {
+                    children: reactElement(
+                        'code',
+                        null,
+                        {
                             className: className,
                             children: node.content
-                        },
-                        $$typeof: TYPE_SYMBOL,
-                        _store: null
-                    })
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null
-            });
+                        }
+                    )
+                }
+            );
         },
         html: function(node, output, state) {
             var className = node.lang ?
                 "markdown-code-" + node.lang :
                 undefined;
 
-            var codeBlock = htmlTag("code", node.content, {
+            var codeBlock = htmlTag("code", sanitizeText(node.content), {
                 class: className
             });
             return htmlTag("pre", codeBlock);
         }
     },
     fence: {
+        order: currOrder++,
         match: blockRegex(/^ *(`{3,}|~{3,}) *(\S+)? *\n([\s\S]+?)\s*\1 *(?:\n *)+\n/),
         parse: function(capture, parse, state) {
             return {
@@ -677,9 +958,12 @@ var defaultRules = {
                 lang: capture[2] || undefined,
                 content: capture[3]
             };
-        }
+        },
+        react: null,
+        html: null
     },
     blockQuote: {
+        order: currOrder++,
         match: blockRegex(/^( *>[^\n]+(\n[^\n]+)*\n*)+\n{2,}/),
         parse: function(capture, parse, state) {
             var content = capture[0].replace(/^ *> ?/gm, '');
@@ -688,21 +972,20 @@ var defaultRules = {
             };
         },
         react: function(node, output, state) {
-            return reactElement({
-                type: 'blockquote',
-                key: state.key,
-                props: {
+            return reactElement(
+                'blockquote',
+                state.key,
+                {
                     children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null
-            });
+                }
+            );
         },
         html: function(node, output, state) {
             return htmlTag("blockquote", output(node.content, state));
         }
     },
     list: {
+        order: currOrder++,
         match: function(source, state, prevCapture) {
             // We only want to break into a list if we are at the start of a
             // line. This is to avoid parsing "hi * there" with "* there"
@@ -712,47 +995,47 @@ var defaultRules = {
             // lists can be inline, because they might be inside another list,
             // in which case we can parse with inline scope, but need to allow
             // nested lists inside this inline scope.
-            
-            var isStartOfLine = LIST_LOOKBEHIND_R.test(prevCapture);
+            var isStartOfLineCapture = LIST_LOOKBEHIND_R.exec(prevCapture);
             var isListBlock = state._list || !state.inline;
-            
-            if (isStartOfLine && isListBlock) {
+
+            if (isStartOfLineCapture && isListBlock) {
+                source = isStartOfLineCapture[1] + source;
+                var res = LIST_R.exec(source);
                 return LIST_R.exec(source);
             } else {
                 return null;
             }
         },
         parse: function(capture, parse, state) {
-            
-            var bulletDirty = capture[2];
-            var bullet = bulletDirty.replace("\t", "");
+            var bullet = capture[2];
             var ordered = bullet.length > 1;
             var start = ordered ? +bullet : undefined;
-
             var items = capture[0]
                 .replace(LIST_BLOCK_END_R, "\n")
                 .match(LIST_ITEM_R);
-            
+
+            // We know this will match here, because of how the regexes are
+            // defined
+            /*:: items = ((items : any) : Array<string>) */
+
             var lastItemWasAParagraph = false;
             var itemContent = items.map(function(item, i) {
-
                 // We need to see how far indented this item is:
-                var space = LIST_ITEM_PREFIX_R.exec(item)[0].length;
+                var prefixCapture = LIST_ITEM_PREFIX_R.exec(item);
+                var space = prefixCapture ? prefixCapture[0].length : 0;
                 // And then we construct a regex to "unindent" the subsequent
                 // lines of the items by that amount:
                 var spaceRegex = new RegExp("^ {1," + space + "}", "gm");
 
                 // Before processing the item, we need a couple things
-                var isSubList = IS_SUB_LIST_R.test(item);
                 var content = item
                          // remove indents on trailing lines:
                         .replace(spaceRegex, '')
                          // remove the bullet:
                         .replace(LIST_ITEM_PREFIX_R, '');
-                 if(isSubList){
-                    content = item;
-                 }
-                
+
+                // I'm not sur4 why this is necessary again?
+                /*:: items = ((items : any) : Array<string>) */
 
                 // Handling "loose" lists, like:
                 //
@@ -793,7 +1076,7 @@ var defaultRules = {
                 }
 
                 var result = parse(adjustedContent, state);
-                
+
                 // Restore our state before returning
                 state.inline = oldStateInline;
                 state._list = oldStateList;
@@ -809,160 +1092,22 @@ var defaultRules = {
         react: function(node, output, state) {
             var ListWrapper = node.ordered ? "ol" : "ul";
 
-            return reactElement({
-                type: ListWrapper,
-                key: state.key,
-                props: {
+            return reactElement(
+                ListWrapper,
+                state.key,
+                {
                     start: node.start,
                     children: node.items.map(function(item, i) {
-                        return reactElement({
-                            type: 'li',
-                            key: i,
-                            props: {
+                        return reactElement(
+                            'li',
+                            '' + i,
+                            {
                                 children: output(item, state)
-                            },
-                            $$typeof: TYPE_SYMBOL,
-                            _store: null,
-                        });
+                            }
+                        );
                     })
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
-        },
-        html: function(node, output, state) {
-            var listItems = node.items.map(function(item) {
-                return htmlTag("li", output(item, state));
-            }).join("");
-
-            var listTag = node.ordered ? "ol" : "ul";
-            var attributes = {
-                start: node.start
-            };
-            return htmlTag(listTag, listItems, attributes);
-        }
-    },
-    sublist: {
-        match: function(source, state, prevCapture) {
-            // We only want to break into a list if we are at the start of a
-            // line. This is to avoid parsing "hi * there" with "* there"
-            // becoming a part of a list.
-            // You might wonder, "but that's inline, so of course it wouldn't
-            // start a list?". You would be correct! Except that some of our
-            // lists can be inline, because they might be inside another list,
-            // in which case we can parse with inline scope, but need to allow
-            // nested lists inside this inline scope.
-            
-            var isStartOfLine = LIST_LOOKBEHIND_R.test(prevCapture);
-            var isListBlock = state._list || !state.inline;
-            if (isStartOfLine && isListBlock) {
-                return SUB_LIST_MATCH_CONDITION.exec(source);
-            } else {
-                return null;
-            }
-        },
-        parse: function(capture, parse, state) {
-            
-            var bulletDirty = capture[2]; 
-            var bullet = bulletDirty.replace("\t", "");
-            var ordered = bullet.length > 1;
-            var start = ordered ? +bullet : undefined;
-
-            var items = capture[0]
-                .replace(LIST_BLOCK_END_R, "")
-                .match(SUB_LIST_ITEM_R);
-            var lastItemWasAParagraph = false;
-            var itemContent = items.map(function(item, i) {
-                // We need to see how far indented this item is:
-                var space = SUB_LIST_ITEM_PREFIX_R.exec(item)[0].length;
-                // And then we construct a regex to "unindent" the subsequent
-                // lines of the items by that amount:
-                var spaceRegex = new RegExp("^ {1," + space + "}", "gm");
-
-                // Before processing the item, we need a couple things
-                var content = item
-                         // remove indents on trailing lines:
-                        .replace(spaceRegex, '')
-                         // remove the bullet:
-                        .replace(SUB_LIST_ITEM_PREFIX_R, '');
-
-                // Handling "loose" lists, like:
-                //
-                //  * this is wrapped in a paragraph
-                //
-                //  * as is this
-                //
-                //  * as is this
-                var isLastItem = (i === items.length - 1);
-                var containsBlocks = content.indexOf("\n\n") !== -1;
-
-                // Any element in a list is a block if it contains multiple
-                // newlines. The last element in the list can also be a block
-                // if the previous item in the list was a block (this is
-                // because non-last items in the list can end with \n\n, but
-                // the last item can't, so we just "inherit" this property
-                // from our previous element).
-                var thisItemIsAParagraph = containsBlocks ||
-                        (isLastItem && lastItemWasAParagraph);
-                lastItemWasAParagraph = thisItemIsAParagraph;
-
-                // backup our state for restoration afterwards. We're going to
-                // want to set state._list to true, and state.inline depending
-                // on our list's looseness.
-                var oldStateInline = state.inline;
-                var oldStateList = state._list;
-                state._list = true;
-
-                // Parse inline if we're in a tight list, or block if we're in
-                // a loose list.
-                var adjustedContent;
-                if (thisItemIsAParagraph) {
-                    state.inline = false;
-                    adjustedContent = content.replace(LIST_ITEM_END_R, "\n\n");
-                } else {
-                    state.inline = true;
-                    adjustedContent = content
-                                      .replace(LIST_ITEM_END_R, "")
-                                      .replace("\t", '');
                 }
-
-                var result = parse(adjustedContent, state);
-                
-                // Restore our state before returning
-                state.inline = oldStateInline;
-                state._list = oldStateList;
-                return result;
-            });
-
-            return {
-                ordered: ordered,
-                start: start,
-                items: itemContent
-            };
-        },
-        react: function(node, output, state) {
-            var ListWrapper = node.ordered ? "ol" : "ul";
-
-            return reactElement({
-                type: ListWrapper,
-                key: state.key,
-                props: {
-                    start: node.start,
-                    children: node.items.map(function(item, i) {
-                        return reactElement({
-                            type: 'li',
-                            key: i,
-                            props: {
-                                children: output(item, state)
-                            },
-                            $$typeof: TYPE_SYMBOL,
-                            _store: null,
-                        });
-                    })
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+            );
         },
         html: function(node, output, state) {
             var listItems = node.items.map(function(item) {
@@ -977,11 +1122,12 @@ var defaultRules = {
         }
     },
     def: {
+        order: currOrder++,
         // TODO(aria): This will match without a blank line before the next
         // block element, which is inconsistent with most of the rest of
         // simple-markdown.
         match: blockRegex(
-            /^ *\[([^\]]+)\]: *<?([^\s>]*)>?(?: +["(]([^\n]+)[")])? *\n(?: *\n)?/
+            /^ *\[([^\]]+)\]: *<?([^\s>]*)>?(?: +["(]([^\n]+)[")])? *\n(?: *\n)*/
         ),
         parse: function(capture, parse, state) {
             var def = capture[1]
@@ -1025,10 +1171,13 @@ var defaultRules = {
             };
         },
         react: function() { return null; },
-        html: function() { return null; }
+        html: function() { return ""; }
     },
     table: {
-        match: blockRegex(/^ *\|(.+)\n *\|( *[-:]+[-| :]*)\n((?: *\|.*(?:\n|$))*)\n*/),
+        order: currOrder++,
+        match: blockRegex(
+            /^ *\|(.+)\n *\|( *[-:]+[-| :]*)\n((?: *\|.*(?:\n|$))*)\n*/
+        ),
         parse: TABLES.parseTable,
         react: function(node, output, state) {
             var getStyle = function(colIndex) {
@@ -1038,73 +1187,61 @@ var defaultRules = {
             };
 
             var headers = node.header.map(function(content, i) {
-                return reactElement({
-                    type: 'th',
-                    key: i,
-                    props: {
+                return reactElement(
+                    'th',
+                    '' + i,
+                    {
                         style: getStyle(i),
+                        scope: 'col',
                         children: output(content, state)
-                    },
-                    $$typeof: TYPE_SYMBOL,
-                    _store: null
-                });
+                    }
+                );
             });
 
             var rows = node.cells.map(function(row, r) {
-                return reactElement({
-                    type: 'tr',
-                    key: r,
-                    props: {
+                return reactElement(
+                    'tr',
+                    '' + r,
+                    {
                         children: row.map(function(content, c) {
-                            return reactElement({
-                                type: 'td',
-                                key: c,
-                                props: {
+                            return reactElement(
+                                'td',
+                                '' + c,
+                                {
                                     style: getStyle(c),
                                     children: output(content, state)
-                                },
-                                $$typeof: TYPE_SYMBOL,
-                                _store: null,
-                            });
+                                }
+                            );
                         })
-                    },
-                    $$typeof: TYPE_SYMBOL,
-                    _store: null,
-                });
+                    }
+                );
             });
 
-            return reactElement({
-                type: 'table',
-                key: state.key,
-                props: {
-                    children: [reactElement({
-                        type: 'thead',
-                        key: 'thead',
-                        props: {
-                            children: reactElement({
-                                type: 'tr',
-                                props: {
+            return reactElement(
+                'table',
+                state.key,
+                {
+                    children: [reactElement(
+                        'thead',
+                        'thead',
+                        {
+                            children: reactElement(
+                                'tr',
+                                null,
+                                {
                                     children: headers
-                                },
-                                $$typeof: TYPE_SYMBOL,
-                                _store: null,
-                            })
-                        },
-                        $$typeof: TYPE_SYMBOL,
-                        _store: null,
-                    }), reactElement({
-                        type: 'tbody',
-                        key: 'tbody',
-                        props: {
+                                }
+                            )
+                        }
+                    ), reactElement(
+                        'tbody',
+                        'tbody',
+                        {
                             children: rows
-                        },
-                        $$typeof: TYPE_SYMBOL,
-                        _store: null,
-                    })]
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+                        }
+                    )]
+                }
+            );
         },
         html: function(node, output, state) {
             var getStyle = function(colIndex) {
@@ -1114,7 +1251,7 @@ var defaultRules = {
 
             var headers = node.header.map(function(content, i) {
                 return htmlTag("th", output(content, state),
-                    { style: getStyle(i) });
+                    { style: getStyle(i), scope: "col" });
             }).join("");
 
             var rows = node.cells.map(function(row) {
@@ -1133,25 +1270,25 @@ var defaultRules = {
         }
     },
     newline: {
+        order: currOrder++,
         match: blockRegex(/^(?:\n *)*\n/),
         parse: ignoreCapture,
         react: function(node, output, state) { return "\n"; },
         html: function(node, output, state) { return "\n"; }
     },
     paragraph: {
+        order: currOrder++,
         match: blockRegex(/^((?:[^\n]|\n(?! *\n))+)(?:\n *)+\n/),
         parse: parseCaptureInline,
         react: function(node, output, state) {
-            return reactElement({
-                type: 'div',
-                key: state.key,
-                props: {
+            return reactElement(
+                'div',
+                state.key,
+                {
                     className: 'paragraph',
                     children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+                }
+            );
         },
         html: function(node, output, state) {
             var attributes = {
@@ -1161,6 +1298,7 @@ var defaultRules = {
         }
     },
     escape: {
+        order: currOrder++,
         // We don't allow escaping numbers, letters, or spaces here so that
         // backslashes used in plain text still get rendered. But allowing
         // escaping anything else provides a very flexible escape mechanism,
@@ -1171,9 +1309,12 @@ var defaultRules = {
                 type: "text",
                 content: capture[1]
             };
-        }
+        },
+        react: null,
+        html: null
     },
     autolink: {
+        order: currOrder++,
         match: inlineRegex(/^<([^ >]+:\/[^ >]+)>/),
         parse: function(capture, parse, state) {
             return {
@@ -1184,9 +1325,12 @@ var defaultRules = {
                 }],
                 target: capture[1]
             };
-        }
+        },
+        react: null,
+        html: null
     },
     mailto: {
+        order: currOrder++,
         match: inlineRegex(/^<([^ >]+@[^ >]+)>/),
         parse: function(capture, parse, state) {
             var address = capture[1];
@@ -1205,9 +1349,12 @@ var defaultRules = {
                 }],
                 target: target
             };
-        }
+        },
+        react: null,
+        html: null
     },
     url: {
+        order: currOrder++,
         match: inlineRegex(/^(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/),
         parse: function(capture, parse, state) {
             return {
@@ -1219,32 +1366,33 @@ var defaultRules = {
                 target: capture[1],
                 title: undefined
             };
-        }
+        },
+        react: null,
+        html: null
     },
     link: {
+        order: currOrder++,
         match: inlineRegex(new RegExp(
             "^\\[(" + LINK_INSIDE + ")\\]\\(" + LINK_HREF_AND_TITLE + "\\)"
         )),
         parse: function(capture, parse, state) {
             var link ={
                 content: parse(capture[1], state),
-                target: capture[2],
+                target: unescapeUrl(capture[2]),
                 title: capture[3]
             };
             return link;
         },
         react: function(node, output, state) {
-            return reactElement({
-                type: 'a',
-                key: state.key,
-                props: {
+            return reactElement(
+                'a',
+                state.key,
+                {
                     href: sanitizeUrl(node.target),
                     title: node.title,
                     children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+                }
+            );
         },
         html: function(node, output, state) {
             var attributes = {
@@ -1256,29 +1404,28 @@ var defaultRules = {
         }
     },
     image: {
+        order: currOrder++,
         match: inlineRegex(new RegExp(
             "^!\\[(" + LINK_INSIDE + ")\\]\\(" + LINK_HREF_AND_TITLE + "\\)"
         )),
         parse: function(capture, parse, state) {
             var image = {
                 alt: capture[1],
-                target: capture[2],
+                target: unescapeUrl(capture[2]),
                 title: capture[3]
             };
             return image;
         },
         react: function(node, output, state) {
-            return reactElement({
-                type: 'img',
-                key: state.key,
-                props: {
+            return reactElement(
+                'img',
+                state.key,
+                {
                     src: sanitizeUrl(node.target),
                     alt: node.alt,
                     title: node.title
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+                }
+            );
         },
         html: function(node, output, state) {
             var attributes = {
@@ -1291,6 +1438,7 @@ var defaultRules = {
         }
     },
     reflink: {
+        order: currOrder++,
         match: inlineRegex(new RegExp(
             // The first [part] of the link
             "^\\[(" + LINK_INSIDE + ")\\]" +
@@ -1302,9 +1450,12 @@ var defaultRules = {
                 type: "link",
                 content: parse(capture[1], state)
             });
-        }
+        },
+        react: null,
+        html: null
     },
     refimage: {
+        order: currOrder++,
         match: inlineRegex(new RegExp(
             // The first [part] of the link
             "^!\\[(" + LINK_INSIDE + ")\\]" +
@@ -1316,45 +1467,12 @@ var defaultRules = {
                 type: "image",
                 alt: capture[1]
             });
-        }
-    },
-    strong: {
-        match: inlineRegex(/^\*\*([\s\S]+?)\*\*(?!\*)/),
-        parse: parseCaptureInline,
-        react: function(node, output, state) {
-            return reactElement({
-                type: 'strong',
-                key: state.key,
-                props: {
-                    children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
         },
-        html: function(node, output, state) {
-            return htmlTag("strong", output(node.content, state));
-        }
-    },
-    u: {
-        match: inlineRegex(/^__([\s\S]+?)__(?!_)/),
-        parse: parseCaptureInline,
-        react: function(node, output, state) {
-            return reactElement({
-                type: 'u',
-                key: state.key,
-                props: {
-                    children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
-        },
-        html: function(node, output, state) {
-            return htmlTag("u", output(node.content, state));
-        }
+        react: null,
+        html: null
     },
     em: {
+        order: currOrder /* same as strong/u */,
         match: inlineRegex(
             new RegExp(
                 // only match _s surrounding words.
@@ -1366,56 +1484,106 @@ var defaultRules = {
                 // Only match *s that are followed by a non-space:
                 "^\\*(?=\\S)(" +
                 // Match at least one of:
-                //  - `**`: so that bolds inside italics don't close the
-                //          italics
-                //  - whitespace: followed by a non-* (we don't
-                //          want ' *' to close an italics--it might
-                //          start a list)
-                //  - non-whitespace, non-* characters
-                "(?:\\*\\*|\\s+[^\\*\\s]|[^\\s\\*])+?" +
+                "(?:" +
+                  //  - `**`: so that bolds inside italics don't close the
+                  //          italics
+                  "\\*\\*|" +
+                  //  - escape sequence: so escaped *s don't close us
+                  "\\\\[\\s\\S]|" +
+                  //  - whitespace: followed by a non-* (we don't
+                  //          want ' *' to close an italics--it might
+                  //          start a list)
+                  "\\s+(?:\\\\[\\s\\S]|[^\\s\\*\\\\]|\\*\\*)|" +
+                  //  - non-whitespace, non-*, non-backslash characters
+                  "[^\\s\\*\\\\]" +
+                ")+?" +
                 // followed by a non-space, non-* then *
                 ")\\*(?!\\*)"
             )
         ),
+        quality: function(capture) {
+            // precedence by length, `em` wins ties:
+            return capture[0].length + 0.2;
+        },
         parse: function(capture, parse, state) {
             return {
                 content: parse(capture[2] || capture[1], state)
             };
         },
         react: function(node, output, state) {
-            return reactElement({
-                type: 'em',
-                key: state.key,
-                props: {
+            return reactElement(
+                'em',
+                state.key,
+                {
                     children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+                }
+            );
         },
         html: function(node, output, state) {
             return htmlTag("em", output(node.content, state));
         }
     },
-    del: {
-        match: inlineRegex(/^~~(?=\S)([\s\S]*?\S)~~/),
+    strong: {
+        order: currOrder /* same as em */,
+        match: inlineRegex(/^\*\*((?:\\[\s\S]|[^\\])+?)\*\*(?!\*)/),
+        quality: function(capture) {
+            // precedence by length, wins ties vs `u`:
+            return capture[0].length + 0.1;
+        },
         parse: parseCaptureInline,
         react: function(node, output, state) {
-            return reactElement({
-                type: 'del',
-                key: state.key,
-                props: {
+            return reactElement(
+                'strong',
+                state.key,
+                {
                     children: output(node.content, state)
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+                }
+            );
+        },
+        html: function(node, output, state) {
+            return htmlTag("strong", output(node.content, state));
+        }
+    },
+    u: {
+        order: currOrder++ /* same as em&strong; increment for next rule */,
+        match: inlineRegex(/^__((?:\\[\s\S]|[^\\])+?)__(?!_)/),
+        quality: function(capture) {
+            // precedence by length, loses all ties
+            return capture[0].length;
+        },
+        parse: parseCaptureInline,
+        react: function(node, output, state) {
+            return reactElement(
+                'u',
+                state.key,
+                {
+                    children: output(node.content, state)
+                }
+            );
+        },
+        html: function(node, output, state) {
+            return htmlTag("u", output(node.content, state));
+        }
+    },
+    del: {
+        order: currOrder++,
+        match: inlineRegex(/^~~(?=\S)((?:\\[\s\S]|~(?!~)|[^\s\\~]|\s+(?!~~))+?)~~/),
+        parse: parseCaptureInline,
+        react: function(node, output, state) {
+            return reactElement(
+                'del',
+                state.key,
+                {
+                    children: output(node.content, state)
+                }
+            );
         },
         html: function(node, output, state) {
             return htmlTag("del", output(node.content, state));
         }
     },
     inlineCode: {
+        order: currOrder++,
         match: inlineRegex(/^(`+)\s*([\s\S]*?[^`])\s*\1(?!`)/),
         parse: function(capture, parse, state) {
             return {
@@ -1423,47 +1591,44 @@ var defaultRules = {
             };
         },
         react: function(node, output, state) {
-            return reactElement({
-                type: 'code',
-                key: state.key,
-                props: {
+            return reactElement(
+                'code',
+                state.key,
+                {
                     children: node.content
-                },
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+                }
+            );
         },
         html: function(node, output, state) {
-            return htmlTag("code", node.content);
+            return htmlTag("code", sanitizeText(node.content));
         }
     },
     br: {
+        order: currOrder++,
         match: anyScopeRegex(/^ {2,}\n/),
         parse: ignoreCapture,
         react: function(node, output, state) {
-            return reactElement({
-                type: 'br',
-                key: state.key,
-                props: EMPTY_PROPS,
-                $$typeof: TYPE_SYMBOL,
-                _store: null,
-            });
+            return reactElement(
+                'br',
+                state.key,
+                EMPTY_PROPS
+            );
         },
         html: function(node, output, state) {
             return "<br>";
         }
     },
     text: {
+        order: currOrder++,
         // Here we look for anything followed by non-symbols,
         // double newlines, or double-space-newlines
         // We break on any symbol characters so that this grammar
         // is easy to extend without needing to modify this regex
-        match: inlineRegex(
-            /^[\s\S]+?(?=[^0-9A-Za-z\s\u00c0-\uffff]|\n\n| {2,}\n|\w+:\S|\t(?:[*+-]|\d+\.)|$)/
+        match: anyScopeRegex(
+            /^[\s\S]+?(?=[^0-9A-Za-z\s\u00c0-\uffff]|\n\n| {2,}\n|\w+:\S|$)/
         ),
-        
         parse: function(capture, parse, state) {
-             return {
+            return {
                 content: capture[0]
             };
         },
@@ -1471,58 +1636,231 @@ var defaultRules = {
             return node.content;
         },
         html: function(node, output, state) {
-            return node.content;
+            return sanitizeText(node.content);
         }
-    },
-    
+    }
 };
 
-Object.keys(defaultRules).forEach(function(type, i) {
-    defaultRules[type].order = i;
-});
-
-var ruleOutput = function(rules, property) {
+var ruleOutput = function/* :: <Rule : Object> */(
+    rules /* : OutputRules<Rule> */,
+    property /* : $Keys<Rule> */
+) {
     if (!property && typeof console !== "undefined") {
         console.warn("simple-markdown ruleOutput should take 'react' or " +
             "'html' as the second argument."
         );
     }
 
-    // deprecated:
-    property = property || "react";
-
-    var nestedRuleOutput = function(ast, outputFunc, state) {
+    var nestedRuleOutput /* : NodeOutput<any> */ = function(
+        ast /* : SingleASTNode */,
+        outputFunc /* : NodeOutput<any> */,
+        state /* : State */
+    ) {
         return rules[ast.type][property](ast, outputFunc, state);
     };
     return nestedRuleOutput;
 };
 
+var reactFor = function(outputFunc /* : ReactNodeOutput */) /* : ReactOutput */ {
+    var nestedOutput /* : ReactOutput */ = function(ast, state) {
+        state = state || {};
+        if (Array.isArray(ast)) {
+            var oldKey = state.key;
+            var result /* : Array<ReactElements> */ = [];
+
+            // map nestedOutput over the ast, except group any text
+            // nodes together into a single string output.
+            var lastResult = null;
+            for (var i = 0; i < ast.length; i++) {
+                state.key = '' + i;
+                var nodeOut = nestedOutput(ast[i], state);
+                if (typeof nodeOut === "string" && typeof lastResult === "string") {
+                    lastResult = lastResult + nodeOut;
+                    result[result.length - 1] = lastResult;
+                } else {
+                    result.push(nodeOut);
+                    lastResult = nodeOut;
+                }
+            }
+
+            state.key = oldKey;
+            return result;
+        } else {
+            return outputFunc(ast, nestedOutput, state);
+        }
+    };
+    return nestedOutput;
+};
+
+var htmlFor = function(outputFunc /* : HtmlNodeOutput */) /* : HtmlOutput */ {
+    var nestedOutput /* : HtmlOutput */ = function(ast, state) {
+        state = state || {};
+        if (Array.isArray(ast)) {
+            return ast.map(function(node) {
+                return nestedOutput(node, state);
+            }).join("");
+        } else {
+            return outputFunc(ast, nestedOutput, state);
+        }
+    };
+    return nestedOutput;
+};
+
+var outputFor = function/* :: <Rule : Object> */(
+    rules /* : OutputRules<Rule> */,
+    property /* : $Keys<Rule> */,
+    defaultState /* : ?State */
+) {
+    if (!property) {
+        throw new Error('simple-markdown: outputFor: `property` must be ' +
+            'defined. ' +
+            'if you just upgraded, you probably need to replace `outputFor` ' +
+            'with `reactFor`'
+        );
+    }
+
+    var latestState;
+    var arrayRule = rules.Array || defaultRules.Array;
+    var nestedOutput /* : Output<any> */ = function(ast, state) {
+        state = state || latestState;
+        latestState = state;
+        if (Array.isArray(ast)) {
+            return arrayRule[property](ast, nestedOutput, state);
+        } else {
+            return rules[ast.type][property](ast, nestedOutput, state);
+        }
+    };
+
+    var outerOutput = function(ast, state) {
+        latestState = populateInitialState(state, defaultState);
+        return nestedOutput(ast, latestState);
+    };
+    return outerOutput;
+};
+
 var defaultRawParse = parserFor(defaultRules);
-var defaultBlockParse = function(source) {
-    return defaultRawParse(source + "\n\n", {
-        inline: false
-    });
+var defaultBlockParse = function(source, state) {
+    state = state || {};
+    state.inline = false;
+    return defaultRawParse(source, state);
 };
-var defaultInlineParse = function(source) {
-    return defaultRawParse(source, {
-        inline: true
-    });
+var defaultInlineParse = function(source, state) {
+    state = state || {};
+    state.inline = true;
+    return defaultRawParse(source, state);
 };
-var defaultImplicitParse = function(source) {
-    return defaultRawParse(source, {
-        inline: !(BLOCK_END_R.test(source))
-    });
+var defaultImplicitParse = function(source, state) {
+    var isBlock = BLOCK_END_R.test(source);
+    state = state || {};
+    state.inline = !isBlock;
+    return defaultRawParse(source, state);
 };
 
-var defaultReactOutput = reactFor(ruleOutput(defaultRules, "react"));
-var defaultHtmlOutput = htmlFor(ruleOutput(defaultRules, "html"));
+var defaultReactOutput /* : ReactOutput */ = outputFor(defaultRules, "react");
+var defaultHtmlOutput /* : HtmlOutput */ = outputFor(defaultRules, "html");
 
-var SimpleMarkdown = {
+var markdownToReact = function(source, state) /* : ReactElements */ {
+    return defaultReactOutput(defaultBlockParse(source, state), state);
+};
+var markdownToHtml = function(source, state) /* : string */ {
+    return defaultHtmlOutput(defaultBlockParse(source, state), state);
+};
+
+var ReactMarkdown = function(props) {
+    var divProps = {};
+
+    for (var prop in props) {
+        if (prop !== 'source' &&
+            Object.prototype.hasOwnProperty.call(props, prop)
+        ) {
+            divProps[prop] = props[prop];
+        }
+    }
+    divProps.children = markdownToReact(props.source);
+
+    return reactElement(
+        'div',
+        null,
+        divProps
+    );
+};
+
+
+/*:: // Flow exports:
+type Exports = {
+    +defaultRules: DefaultRules,
+    +parserFor: (rules: ParserRules, defaultState?: ?State) => Parser,
+    +outputFor: <Rule : Object>(rules: OutputRules<Rule>, param: $Keys<Rule>, defaultState?: ?State) => Output<any>,
+
+    +ruleOutput: <Rule : Object>(rules: OutputRules<Rule>, param: $Keys<Rule>) => NodeOutput<any>,
+    +reactFor: (ReactNodeOutput) => ReactOutput,
+    +htmlFor: (HtmlNodeOutput) => HtmlOutput,
+
+    +inlineRegex: (regex: RegExp) => MatchFunction,
+    +blockRegex: (regex: RegExp) => MatchFunction,
+    +anyScopeRegex: (regex: RegExp) => MatchFunction,
+    +parseInline: (parse: Parser, content: string, state: State) => ASTNode,
+    +parseBlock: (parse: Parser, content: string, state: State) => ASTNode,
+
+    +markdownToReact: (source: string, state?: ?State) => ReactElements,
+    +markdownToHtml: (source: string, state?: ?State) => string,
+    +ReactMarkdown: (props: { source: string, [string]: any }) => ReactElement,
+
+    +defaultRawParse: (source: string, state?: ?State) => Array<SingleASTNode>,
+    +defaultBlockParse: (source: string, state?: ?State) => Array<SingleASTNode>,
+    +defaultInlineParse: (source: string, state?: ?State) => Array<SingleASTNode>,
+    +defaultImplicitParse: (source: string, state?: ?State) => Array<SingleASTNode>,
+
+    +defaultReactOutput: ReactOutput,
+    +defaultHtmlOutput: HtmlOutput,
+
+    +preprocess: (source: string) => string,
+    +sanitizeText: (text: Attr) => string,
+    +sanitizeUrl: (url: ?string) => ?string,
+    +unescapeUrl: (url: string) => string,
+    +htmlTag: (tagName: string, content: string, attributes: ?{[any]: ?Attr}, isClosed: ?boolean) => string,
+    +reactElement: (type: string, key: string | null, props: { [string]: any }) => ReactElement,
+};
+
+export type {
+    // Hopefully you shouldn't have to use these, but they're here if you need!
+    // Top-level API:
+    State,
+    Parser,
+    Output,
+    ReactOutput,
+    HtmlOutput,
+
+    // Most of the following types should be considered experimental and
+    // subject to change or change names. Again, they shouldn't be necessary,
+    // but if they are I'd love to hear how so I can better support them!
+
+    // Individual Rule fields:
+    Capture,
+    MatchFunction,
+    ParseFunction,
+    NodeOutput,
+    ArrayNodeOutput,
+    ReactNodeOutput,
+
+    // Single rules:
+    ParserRule,
+    ReactOutputRule,
+    HtmlOutputRule,
+
+    // Sets of rules:
+    ParserRules,
+    OutputRules,
+    Rules,
+    ReactRules,
+    HtmlRules,
+};
+*/
+
+var SimpleMarkdown /* : Exports */ = {
     defaultRules: defaultRules,
     parserFor: parserFor,
-    ruleOutput: ruleOutput,
-    reactFor: reactFor,
-    htmlFor: htmlFor,
+    outputFor: outputFor,
 
     inlineRegex: inlineRegex,
     blockRegex: blockRegex,
@@ -1530,7 +1868,11 @@ var SimpleMarkdown = {
     parseInline: parseInline,
     parseBlock: parseBlock,
 
-    defaultRawParse: defaultRawParse,
+    // default wrappers:
+    markdownToReact: markdownToReact,
+    markdownToHtml: markdownToHtml,
+    ReactMarkdown: ReactMarkdown,
+
     defaultBlockParse: defaultBlockParse,
     defaultInlineParse: defaultInlineParse,
     defaultImplicitParse: defaultImplicitParse,
@@ -1539,12 +1881,30 @@ var SimpleMarkdown = {
     defaultHtmlOutput: defaultHtmlOutput,
 
     preprocess: preprocess,
+    sanitizeText: sanitizeText,
     sanitizeUrl: sanitizeUrl,
+    unescapeUrl: unescapeUrl,
+    htmlTag: htmlTag,
+    reactElement: reactElement,
 
     // deprecated:
-    defaultParse: defaultImplicitParse,
-    outputFor: reactFor,
-    defaultOutput: defaultReactOutput,
+    defaultRawParse: defaultRawParse,
+    ruleOutput: ruleOutput,
+    reactFor: reactFor,
+    htmlFor: htmlFor,
+
+    defaultParse: function() {
+        if (typeof console !== 'undefined') {
+            console.warn('defaultParse is deprecated, please use `defaultImplicitParse`');
+        }
+        return defaultImplicitParse.apply(null, arguments);
+    },
+    defaultOutput: function() {
+        if (typeof console !== 'undefined') {
+            console.warn('defaultOutput is deprecated, please use `defaultReactOutput`');
+        }
+        return defaultReactOutput.apply(null, arguments);
+    }
 };
 
 if (typeof module !== "undefined" && module.exports) {
@@ -1554,5 +1914,8 @@ if (typeof module !== "undefined" && module.exports) {
 } else {
     window.SimpleMarkdown = SimpleMarkdown;
 }
+/*:: module.exports = SimpleMarkdown; */
 
-})();
+// Close the IIFE
+/*:: (function() { */})();
+
