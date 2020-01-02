@@ -1,7 +1,10 @@
-// @flow
+/* @flow */
+/* @ts-check */
 
-var assert = require("assert");
-var _ = require("underscore");
+// As of 2019-11-03, flow doesn't have definitions for assert.strict:
+// https://github.com/facebook/flow/pull/7660
+// So we use a /*::*/ hack to satisfy flow:
+var assert = require("assert") /*:: || {} */ .strict;
 var React = require("react");
 var ReactDOMServer = require("react-dom/server");
 
@@ -21,36 +24,39 @@ var FLOW_IGNORE_COVARIANCE = {
 };
 */
 
-// A pretty-printer that handles `undefined` and functions better
-// than JSON.stringify
-// Important because some AST node fields can be undefined, and
-// if those don't show up in the assert output, it can be
-// very confusing to figure out how the actual and expected differ
-// Whether node's util.inspect or JSON.stringify is better seems
-// context dependent.
+/**
+ * A pretty-printer that handles `undefined` and functions better
+ * than JSON.stringify
+ * Important because some AST node fields can be undefined, and
+ * if those don't show up in the assert output, it can be
+ * very confusing to figure out how the actual and expected differ
+ * Whether node's util.inspect or JSON.stringify is better seems
+ * context dependent.
+ *
+ * @param {SimpleMarkdown.ASTNode | Array<SimpleMarkdown.TableAlignment>} ast
+ */
 var prettyPrintAST = function(ast) {
     return JSON.stringify(ast, null, 4);
+//    // FIXME(aria): For debugging in more depth? This used to work?
 //    return nodeUtil.inspect(ast, {
 //        depth: null,
 //        colors: false
 //    });
 };
 
+/**
+ * Asset that two ast parse trees are equal
+ * @param {SimpleMarkdown.ASTNode | Array<SimpleMarkdown.TableAlignment>} parsed
+ * @param {SimpleMarkdown.ASTNode | Array<SimpleMarkdown.TableAlignment>} expected
+ */
 var validateParse = function(parsed, expected) {
-    if (!_.isEqual(parsed, expected)) {
-        var parsedStr = prettyPrintAST(parsed);
-        var expectedStr = prettyPrintAST(expected);
-        // assert.fail doesn't seem to print the
-        // expected and actual anymore, so we just
-        // throw our own exception.
-        throw new Error("Expected:\n" +
-            expectedStr +
-            "\n\nActual:\n" +
-            parsedStr
-        );
-    }
+    assert.deepEqual(parsed, expected);
 };
 
+/**
+ * @param {SimpleMarkdown.ReactElements} reactElements
+ * @returns {string}
+ */
 var reactToHtml = function(reactElements) {
     var rawHtml = ReactDOMServer.renderToStaticMarkup(
         React.createElement('div', {}, reactElements)
@@ -65,26 +71,46 @@ var reactToHtml = function(reactElements) {
     return simplifiedHtml;
 };
 
+/**
+ * @param {SimpleMarkdown.ASTNode} parsed
+ * @returns {string}
+ */
 var htmlThroughReact = function(parsed) {
     var output = defaultReactOutput(parsed);
     return reactToHtml(output);
 };
 
+/**
+ * @param {string} source
+ * @returns {string}
+ */
 var htmlFromReactMarkdown = function(source) {
     return htmlThroughReact(implicitParse(source));
 };
 
+/**
+ * @param {string} source
+ * @returns {string}
+ */
 var htmlFromMarkdown = function(source) {
     var html = defaultHtmlOutput(implicitParse(source));
     var simplifiedHtml = html.replace(/\s+/g, ' ');
     return simplifiedHtml;
 };
 
+/**
+ * @param {string} source
+ * @param {string} html
+ */
 var assertParsesToReact = function(source, html) {
     var actualHtml = htmlFromReactMarkdown(source);
     assert.strictEqual(actualHtml, html);
 };
 
+/**
+ * @param {string} source
+ * @param {string} html
+ */
 var assertParsesToHtml = function(source, html) {
     var actualHtml = htmlFromMarkdown(source);
     assert.strictEqual(actualHtml, html);
@@ -550,6 +576,26 @@ describe("simple markdown", function() {
             }]);
         });
 
+        it("should ignore a single space at the start and end of an inline code block separating a '`'", function() {
+            var parsed1 = inlineParse(
+                "test `` ` `` escaping a code block"
+            );
+            validateParse(parsed1, [
+                {type: "text", content: "test "},
+                {type: "inlineCode", content: "`"},
+                {type: "text", content: " escaping a code block"},
+            ]);
+
+            var parsed1 = inlineParse(
+                "test ``  `  `` escaping a code block"
+            );
+            validateParse(parsed1, [
+                {type: "text", content: "test "},
+                {type: "inlineCode", content: " ` "},
+                {type: "text", content: " escaping a code block"},
+            ]);
+        });
+
         it("should allow you to escape special characters with \\", function() {
             var parsed = inlineParse(
                 "\\`hi\\` \\*bye\\* \\~\\|\\<\\[\\{"
@@ -685,6 +731,19 @@ describe("simple markdown", function() {
                 },
             ]);
         });
+
+        it("should allow one level of balanced parens in link urls", function() {
+            var parsed = inlineParse("[link]((foo)and(bar))");
+            validateParse(parsed, [{
+                type: "link",
+                content: [{
+                    "content": "link",
+                    "type": "text"
+                }],
+                target: "(foo)and(bar)",
+                title: undefined
+            }]);
+        })
 
         it("should parse basic <autolinks>", function() {
             var parsed = inlineParse("<http://www.google.com>");
@@ -2472,7 +2531,9 @@ describe("simple markdown", function() {
                     [{type: "text", content: "h2"}],
                     [{type: "text", content: "h3"}]
                 ],
-                align: [null, null, null],
+                align: /** @type {Array<SimpleMarkdown.TableAlignment>} */ (
+                    [null, null, null]
+                ),
                 cells: [
                     [
                         [{type: "text", content: "d1"}],
@@ -2514,7 +2575,9 @@ describe("simple markdown", function() {
                     [{type: "em", content: [{type: "text", content: "h2"}]}],
                     [{type: "em", content: [{type: "text", content: "h3"}]}],
                 ],
-                align: [null, null, null],
+                align: /** @type {Array<SimpleMarkdown.TableAlignment>} */ (
+                    [null, null, null]
+                ),
                 cells: [[
                     [{type: "em", content: [{type: "text", content: "d1"}]}],
                     [{type: "em", content: [{type: "text", content: "d2"}]}],
@@ -2540,6 +2603,10 @@ describe("simple markdown", function() {
         });
 
         it("should parse table alignments", function() {
+            /**
+             * @param {string} tableSrc
+             * @param {Array<SimpleMarkdown.TableAlignment>} expectedAligns
+             */
             var validateAligns = function(tableSrc, expectedAligns) {
                 var parsed = blockParse(tableSrc + "\n");
                 assert.strictEqual(parsed[0].type, "table");
@@ -2551,7 +2618,9 @@ describe("simple markdown", function() {
                 "| h1 | h2 | h3 |\n" +
                 "| -- | -- | -- |\n" +
                 "| d1 | d2 | d3 |\n",
-                [null, null, null]
+                /** @type {Array<SimpleMarkdown.TableAlignment>} */ (
+                    [null, null, null]
+                )
             );
 
             validateAligns(
@@ -2593,13 +2662,15 @@ describe("simple markdown", function() {
         it("should parse empty table cells", function() {
             var expected = [{
                 type: "table",
-                header: [
+                header: /** @type {any[][]} */ ([
                     [],
                     [],
                     []
-                ],
-                align: [null, null, null],
-                cells: [
+                ]),
+                align: /** @type {Array<SimpleMarkdown.TableAlignment>} */ (
+                    [null, null, null]
+                ),
+                cells: /** @type {any[][]} */ ([
                     [
                         [],
                         [],
@@ -2610,7 +2681,7 @@ describe("simple markdown", function() {
                         [],
                         []
                     ]
-                ]
+                ]),
             }];
 
             var parsedPiped = blockParse(
@@ -2632,6 +2703,90 @@ describe("simple markdown", function() {
             validateParse(parsedNp, expected);
         });
 
+        it("should allow escaping pipes inside tables", function() {
+            var expected = [{
+                type: "table",
+                header: [
+                    [
+                        {type: "text", content: '|'},
+                        {type: "text", content: 'Attribute'},
+                        {type: "text", content: '|'},
+                    ],
+                    [
+                        {type: "text", content: '|'},
+                        {type: "text", content: 'Type'},
+                        {type: "text", content: '|'},
+                    ],
+                ],
+                align: /** @type {Array<SimpleMarkdown.TableAlignment>} */ (
+                    [null, null]
+                ),
+                cells: [[
+                    [
+                        {type: "text", content: "pos"},
+                        {type: "text", content: "|"},
+                        {type: "text", content: "position"}
+                    ],
+                    [
+                        {type: "text", content: '"left'},
+                        {type: "text", content: '" '},
+                        {type: "text", content: '|'},
+                        {type: "text", content: ' '},
+                        {type: "text", content: '"right'},
+                        {type: "text", content: '"'}
+                    ],
+                ]]
+            }];
+
+            var parsedPiped = blockParse(
+                '| \\|Attribute\\| | \\|Type\\|         |\n' +
+                '| --------------- | ------------------ |\n' +
+                '| pos\\|position  | "left" \\| "right" |\n' +
+                '\n'
+            );
+            validateParse(parsedPiped, expected);
+
+            var parsedNp = blockParse(
+                '\\|Attribute\\| | \\|Type\\|        \n' +
+                '--------------- | ------------------\n' +
+                'pos\\|position  | "left" \\| "right"\n' +
+                '\n'
+            );
+            validateParse(parsedNp, expected);
+        });
+
+        it("should allow pipes in code inside tables", function() {
+            var expected = [{
+                type: "table",
+                header: [
+                    [{type: "text", content: 'Attribute'}],
+                    [{type: "text", content: 'Type'}],
+                ],
+                align: /** @type {Array<SimpleMarkdown.TableAlignment>} */ (
+                    [null, null]
+                ),
+                cells: [[
+                    [{type: "inlineCode", content: "position"}],
+                    [{type: "inlineCode", content: '"left" | "right"'}],
+                ]]
+            }];
+
+            var parsedPiped = blockParse(
+                '| Attribute    | Type                  |\n' +
+                '| ------------ | --------------------- |\n' +
+                '| `position`   | `"left" | "right"`   |\n' +
+                '\n'
+            );
+            validateParse(parsedPiped, expected);
+
+            var parsedNp = blockParse(
+                'Attribute    | Type                 \n' +
+                '------------ | ---------------------\n' +
+                '`position`   | `"left" | "right"`\n' +
+                '\n'
+            );
+            validateParse(parsedNp, expected);
+        });
 
         it("should be able to parse <br>s", function() {
             // Inside a paragraph:
@@ -2743,25 +2898,30 @@ describe("simple markdown", function() {
     describe("parser extension api", function() {
         it("should parse a simple %variable% extension", function() {
             var percentVarRule = {
-                match: function(source) {
+                match: function(/** @type {string} */ source) {
                     return /^%([\s\S]+?)%/.exec(source);
                 },
 
                 order: SimpleMarkdown.defaultRules.em.order + 0.5,
 
-                parse: function(capture, parse, state) {
+                parse: function(
+                    /** @type {SimpleMarkdown.Capture} */ capture,
+                    /** @type {SimpleMarkdown.Parser} */ parse,
+                    /** @type {SimpleMarkdown.State} */ state
+                ) {
                     return {
                         content: capture[1]
                     };
                 }
             };
 
-            var rules = _.extend({}, SimpleMarkdown.defaultRules, {
+            var rules = Object.assign({}, SimpleMarkdown.defaultRules, {
                 percentVar: percentVarRule
             });
 
             var rawBuiltParser = SimpleMarkdown.parserFor(rules);
 
+            /** @type {SimpleMarkdown.Parser} */
             var inlineParse = function(source) {
                 return rawBuiltParser(source, {inline: true});
             };
@@ -2778,7 +2938,11 @@ describe("simple markdown", function() {
         describe("should sort rules by order and name", function() {
             var emRule = {
                 match: SimpleMarkdown.inlineRegex(/^_([\s\S]+?)_/),
-                parse: function(capture, parse, state) {
+                parse: function(
+                    /** @type {SimpleMarkdown.Capture} */ capture,
+                    /** @type {SimpleMarkdown.Parser} */ parse,
+                    /** @type {SimpleMarkdown.State} */ state
+                ) {
                     return {
                         content: capture[1]
                     };
@@ -2786,22 +2950,26 @@ describe("simple markdown", function() {
             };
             var strongRule = {
                 match: SimpleMarkdown.defaultRules.strong.match,
-                parse: function(capture, parse, state) {
+                parse: function(
+                    /** @type {SimpleMarkdown.Capture} */ capture,
+                    /** @type {SimpleMarkdown.Parser} */ parse,
+                    /** @type {SimpleMarkdown.State} */ state
+                ) {
                     return {
                         content: capture[1]
                     };
                 }
             };
-            var textRule = _.extend({}, SimpleMarkdown.defaultRules.text, {
+            var textRule = Object.assign({}, SimpleMarkdown.defaultRules.text, {
                 order: 10
             });
 
             it("should sort rules by order", function() {
                 var parser1 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 1
                     }),
                     text: textRule
@@ -2813,10 +2981,10 @@ describe("simple markdown", function() {
                 ]);
 
                 var parser2 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 1
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0
                     }),
                     text: textRule
@@ -2830,10 +2998,10 @@ describe("simple markdown", function() {
 
             it("should allow fractional orders", function() {
                 var parser1 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 1.4
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0.9
                     }),
                     text: textRule
@@ -2845,10 +3013,10 @@ describe("simple markdown", function() {
                 ]);
 
                 var parser2 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0.5
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0
                     }),
                     text: textRule
@@ -2862,10 +3030,10 @@ describe("simple markdown", function() {
 
             it("should allow negative orders", function() {
                 var parser1 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: -1
                     }),
                     text: textRule
@@ -2877,10 +3045,10 @@ describe("simple markdown", function() {
                 ]);
 
                 var parser2 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: -2
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 1
                     }),
                     text: textRule
@@ -2894,10 +3062,10 @@ describe("simple markdown", function() {
 
             it("should break ties by rule name", function() {
                 var parser1 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0
                     }),
                     text: textRule
@@ -2911,10 +3079,10 @@ describe("simple markdown", function() {
                 // ...regardless of their order in the
                 // original rule definition
                 var parser2 = SimpleMarkdown.parserFor({
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0
                     }),
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0
                     }),
                     text: textRule
@@ -2928,12 +3096,13 @@ describe("simple markdown", function() {
 
             it("should output a warning for non-numeric orders", function() {
                 var oldconsolewarn = console.warn;
+                /** @type {any[]} */
                 var warnings = [];
-                /*::FLOW_IGNORE_COVARIANCE.*/ console.warn = function(warning) {
+                /*::FLOW_IGNORE_COVARIANCE.*/ console.warn = function(/** @type {any} */ warning) {
                     warnings.push(warning);
                 };
                 var parser1 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 1/0 - 1/0
                     }),
                     text: textRule
@@ -2950,11 +3119,11 @@ describe("simple markdown", function() {
 
             it("should break ties with quality", function() {
                 var parser1 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0,
                         quality: function() { return 1; },
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0,
                         quality: function() { return 2; },
                     }),
@@ -2969,11 +3138,11 @@ describe("simple markdown", function() {
                 // ...regardless of their order in the
                 // original rule definition
                 var parser2 = SimpleMarkdown.parserFor({
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0,
                         quality: function() { return 2; },
                     }),
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0,
                         quality: function() { return 1; },
                     }),
@@ -2988,10 +3157,10 @@ describe("simple markdown", function() {
 
             it("rules with quality should always win the tie", function() {
                 var parser1 = SimpleMarkdown.parserFor({
-                    em1: _.extend({}, emRule, {
+                    em1: Object.assign({}, emRule, {
                         order: 0,
                     }),
-                    em2: _.extend({}, emRule, {
+                    em2: Object.assign({}, emRule, {
                         order: 0,
                         quality: function() { return 2; },
                     }),
@@ -3005,10 +3174,10 @@ describe("simple markdown", function() {
 
                 // except if they don't match
                 var parser2 = SimpleMarkdown.parserFor({
-                    em: _.extend({}, emRule, {
+                    em: Object.assign({}, emRule, {
                         order: 0,
                     }),
-                    strong: _.extend({}, strongRule, {
+                    strong: Object.assign({}, strongRule, {
                         order: 0,
                         quality: function() { return 2; },
                     }),
@@ -3030,11 +3199,15 @@ describe("simple markdown", function() {
             var parser1 = SimpleMarkdown.parserFor({
                 fancy: {
                     order: SimpleMarkdown.defaultRules.text.order - 1,
-                    match: function(source) {
+                    match: function(/** @type {string} */ source) {
                         return /^.*/.exec(source);
                     },
-                    parse: function(capture, parse, state) {
-                        return capture[0].split(' ').map(function(word) {
+                    parse: function(
+                        /** @type {SimpleMarkdown.Capture} */ capture,
+                        /** @type {SimpleMarkdown.Parser} */ parse,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
+                        return capture[0].split(' ').map(function(/** @type {string} */ word) {
                             return { type: "text", content: word };
                         });
                     },
@@ -3058,7 +3231,11 @@ describe("simple markdown", function() {
             // gives a flattened array result of the words.
             var rules = {
                 Array: {
-                    result: function(arr, output, state) {
+                    result: function(
+                        /** @type {Array<SimpleMarkdown.SingleASTNode>} */ arr,
+                        /** @type {SimpleMarkdown.Output<string[]>} */ output,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
                         return arr.map(function(node) {
                             return output(node, state);
                         }).filter(function(word) {
@@ -3068,23 +3245,35 @@ describe("simple markdown", function() {
                 },
                 word: {
                     order: SimpleMarkdown.defaultRules.text.order - 1,
-                    match: function(source) {
+                    match: function(/** @type {string} */ source) {
                         return /^\w+/.exec(source);
                     },
-                    parse: function(capture, parse, state) {
+                    parse: function(
+                        /** @type {SimpleMarkdown.Capture} */ capture,
+                        /** @type {SimpleMarkdown.Parser} */ parse,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
                         state.wordCount++;
                         return {content: capture[0]};
                     },
-                    result: function(node, output, state) {
+                    result: function(
+                        /** @type {SimpleMarkdown.SingleASTNode} */ node,
+                        /** @type {SimpleMarkdown.NodeOutput<string>} */ output,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
                         state.wordCount++;
                         return node.content;
                     },
                 },
                 delimiter: Object.assign({}, SimpleMarkdown.defaultRules.text, {
-                    match: function(source) {
+                    match: function(/** @type {string} */ source) {
                         return /^\W+/.exec(source);
                     },
-                    result: function(node, output, state) {
+                    result: function(
+                        /** @type {SimpleMarkdown.SingleASTNode} */ node,
+                        /** @type {SimpleMarkdown.NodeOutput<string>} */ output,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
                         return null;
                     },
                 }),
@@ -3094,6 +3283,7 @@ describe("simple markdown", function() {
             var output = SimpleMarkdown.outputFor(rules, 'result', {wordCount: 0});
 
             // test parsing
+            /** @type {{ wordCount?: number }} */
             var parseState = {};
             var ast1 = parse('hi here are some words', parseState);
             assert.strictEqual(parseState.wordCount, 5);
@@ -3103,6 +3293,7 @@ describe("simple markdown", function() {
             assert.deepEqual(ast1, ast2);
 
             // test output
+            /** @type {{ wordCount?: number }} */
             var outputState = {};
             var result1 = output(ast1, outputState);
             assert.deepEqual(result1, ['hi', 'here', 'are', 'some', 'words']);
@@ -3118,10 +3309,14 @@ describe("simple markdown", function() {
                 {
                     fancy: {
                         order: SimpleMarkdown.defaultRules.text.order - 1,
-                        match: function(source) {
+                        match: function(/** @type {string} */ source) {
                             return /^\w+/.exec(source);
                         },
-                        parse: function(capture, parse, state) {
+                        parse: function(
+                            /** @type {SimpleMarkdown.Capture} */ capture,
+                            /** @type {SimpleMarkdown.Parser} */ parse,
+                            /** @type {SimpleMarkdown.State} */ state
+                        ) {
                             var word = capture[0];
                             var translated = state.lookup[word];
                             if (translated) {
@@ -3132,7 +3327,7 @@ describe("simple markdown", function() {
                         },
                     },
                     text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
-                        match: function(source) {
+                        match: function(/** @type {string} */ source) {
                             return /^\W+/.exec(source);
                         },
                     }),
@@ -3163,7 +3358,11 @@ describe("simple markdown", function() {
                 {
                     Array: SimpleMarkdown.defaultRules.Array,
                     text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
-                        react: function(node, output, state) {
+                        react: function(
+                            /** @type {SimpleMarkdown.SingleASTNode} */ node,
+                            /** @type {SimpleMarkdown.ReactNodeOutput} */ output,
+                            /** @type {SimpleMarkdown.State} */ state
+                        ) {
                             return React.createElement(
                                 state.TextComponent,
                                 {key: state.key},
@@ -3192,10 +3391,14 @@ describe("simple markdown", function() {
             var parse = SimpleMarkdown.parserFor({
                 bracketed: {
                     order: SimpleMarkdown.defaultRules.text.order - 1,
-                    match: function(source) {
+                    match: function(/** @type {string} */ source) {
                         return /^\{((?:\\[\S\s]|[^\\\*])+)\}/.exec(source);
                     },
-                    parse: function(capture, parse, state) {
+                    parse: function(
+                        /** @type {SimpleMarkdown.Capture} */ capture,
+                        /** @type {SimpleMarkdown.Parser} */ parse,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
                         var result = {
                             // note no passing state here:
                             content: parse(capture[1]),
@@ -3256,12 +3459,19 @@ describe("simple markdown", function() {
             var output = SimpleMarkdown.outputFor({
                 Array: SimpleMarkdown.defaultRules.Array,
                 paragraph: Object.assign({}, SimpleMarkdown.defaultRules.paragraph, {
-                    html: function(node, output) {
+                    html: function(
+                        /** @type {SimpleMarkdown.SingleASTNode} */ node,
+                        /** @type {SimpleMarkdown.HtmlOutput} */ output
+                    ) {
                         return '<p>' + output(node.content) + '</p>';
                     },
                 }),
                 text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
-                    html: function(node, output, state) {
+                    html: function(
+                        /** @type {SimpleMarkdown.SingleASTNode} */ node,
+                        /** @type {SimpleMarkdown.HtmlOutput} */ output,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
                         return '<span class="' +
                             (state.spanClass || 'default') +
                             '">' +
@@ -3292,13 +3502,19 @@ describe("simple markdown", function() {
                 Array: SimpleMarkdown.defaultRules.Array,
                 spoiler: {
                     order: SimpleMarkdown.defaultRules.text.order - 1,
-                    match: function(source) {
+                    match: function(/** @type {string} */ source) {
                         return /^\[\[((?:[^\]]|\][^\]])+)\]\]/.exec(source);
                     },
-                    parse: function(capture, parse) {
+                    parse: function(
+                        /** @type {SimpleMarkdown.Capture} */ capture,
+                        /** @type {SimpleMarkdown.Parser} */ parse
+                    ) {
                         return {content: parse(capture[1])};
                     },
-                    html: function(node, output) {
+                    html: function(
+                        /** @type {SimpleMarkdown.SingleASTNode} */ node,
+                        /** @type {SimpleMarkdown.HtmlOutput} */ output
+                    ) {
                         return '<span style="background: black;">' +
                             output(node.content) +
                             '</span>';
@@ -3700,7 +3916,11 @@ describe("simple markdown", function() {
         it("should join text nodes before outputting them", function() {
             var rules = Object.assign({}, SimpleMarkdown.defaultRules, {
                 text: Object.assign({}, SimpleMarkdown.defaultRules.text, {
-                    react: function(node, output, state) {
+                    react: function(
+                        /** @type {SimpleMarkdown.SingleASTNode} */ node,
+                        /** @type {SimpleMarkdown.ReactOutput} */ output,
+                        /** @type {SimpleMarkdown.State} */ state
+                    ) {
                         return React.createElement(
                             'span',
                             {key: state.key, className: 'text'},
@@ -4147,6 +4367,52 @@ describe("simple markdown", function() {
                     'hi &lt;span class=&quot;my-class&quot;&gt;there&lt;/span&gt;'
                 );
             });
+        });
+    });
+
+    describe("Exponential backtracking avoidance", function() {
+        it("should parse long inlineCode quickly", function() {
+            var source = '`' + Array(2000).join(' ');
+            var startTime = Date.now();
+            var parsed = inlineParse(source);
+            var duration = Date.now() - startTime;
+            assert.ok(duration < 10, "Expected parsing to finish in <10ms, but was " + duration + "ms.");
+        });
+
+        it("should parse long headings quickly", function() {
+            var source = '### Hi ' + Array(1200).join(' ') + 'there ### \n\n';
+            var startTime = Date.now();
+            var parsed = blockParse(source);
+            var duration = Date.now() - startTime;
+            assert.ok(duration < 10, "Expected parsing to finish in <10ms, but was " + duration + "ms.");
+        });
+
+        it("should parse long del strikethroughs quickly", function() {
+            var source = '~~~h' + Array(30).join(' ') + 'i';
+            var startTime = Date.now();
+            var parsed = inlineParse(source);
+            var duration = Date.now() - startTime;
+            assert.ok(duration < 10, "Expected parsing to finish in <10ms, but was " + duration + "ms.");
+
+            source = '~~~h' + Array(1000).join(' ') + 'i';
+            startTime = Date.now();
+            parsed = inlineParse(source);
+            duration = Date.now() - startTime;
+            assert.ok(duration < 10, "Expected parsing to finish in <10ms, but was " + duration + "ms.");
+        });
+
+        it("should parse long code fences quickly", function() {
+            var source = '~~~' + Array(1000).join(' ') + '\n' + Array(1000).join(' ') + '\n';
+            var startTime = Date.now();
+            var parsed = blockParse(source);
+            var duration = Date.now() - startTime;
+            assert.ok(duration < 10, "Expected parsing to finish in <10ms, but was " + duration + "ms.");
+
+            var source = '~~~' + Array(2000).join(' ') + '\n' + Array(10000).join(' ') + '\n';
+            var startTime = Date.now();
+            var parsed = blockParse(source);
+            var duration = Date.now() - startTime;
+            assert.ok(duration < 10, "Expected parsing to finish in <10ms, but was " + duration + "ms.");
         });
     });
 });

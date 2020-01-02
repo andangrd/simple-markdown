@@ -1,9 +1,3 @@
-(function (global, factory) {
-typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
-typeof define === 'function' && define.amd ? define(factory) :
-(global = global || self, global.SimpleMarkdown = factory());
-}(this, (function () { 'use strict';
-
 /* @flow */
 /* @ts-check */
 
@@ -731,6 +725,10 @@ var LIST_R = new RegExp(
 var LIST_LOOKBEHIND_R = /(?:^|\n)( *)$/;
 
 var TABLES = (function() {
+    // predefine regexes so we don't have to create them inside functions
+    // sure, regex literals should be fast, even inside functions, but they
+    // aren't in all browsers.
+    var TABLE_BLOCK_TRIM = /\n+/g;
     var TABLE_ROW_SEPARATOR_TRIM = /^ *\| *| *\| *$/g;
     var TABLE_CELL_END_TRIM = / *$/;
     var TABLE_RIGHT_ALIGN = /^ *-+: *$/;
@@ -926,7 +924,7 @@ var defaultRules /* : DefaultRules */ = {
 
             // map output over the ast, except group any text
             // nodes together into a single string output.
-            for (var i = 0; i < arr.length; i++) {
+            for (var i = 0, key = 0; i < arr.length; i++) {
 
                 var node = arr[i];
                 if (node.type === 'text') {
@@ -2106,6 +2104,4 @@ var SimpleMarkdown /* : Exports */ = {
     }
 };
 
-return SimpleMarkdown;
-
-})));
+export default SimpleMarkdown;
